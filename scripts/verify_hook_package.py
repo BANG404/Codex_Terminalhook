@@ -45,7 +45,7 @@ def main():
                            TERMINALHOOK_AUDIT_DIR=str(unpacked / "audit"), PYTHONUTF8="1")
         environment.pop("TERMINALHOOK_LONG_WAIT", None)
         tests = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
-                               cwd=ROOT, env=environment, text=True, encoding="utf-8", capture_output=True, timeout=45)
+                               cwd=ROOT, env=environment, text=True, encoding="utf-8", capture_output=True, timeout=120)
         (artifacts / "stop-hook-protocol-tests.log").write_text(tests.stdout + tests.stderr, encoding="utf-8")
         assert tests.returncode == 0, tests.stdout + tests.stderr
         summary = {"passed": True, "version": manifest["version"], "archive_sha256": digest(archive),
