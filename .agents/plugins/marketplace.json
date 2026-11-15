@@ -1,6 +1,6 @@
 {
   "name": "terminalhook-local",
-  "interface": { "displayName": "TerminalHook Local" },
+  "interface": { "displayName": "TerminalHook" },
   "plugins": [
     {
       "name": "terminalhook",
