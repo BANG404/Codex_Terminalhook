@@ -1,0 +1,9 @@
+{
+  "description": "Bind background jobs to the calling chat, wait locally at Stop, and record model request boundaries.",
+  "hooks": {
+    "PreToolUse": [{"matcher": "submit_task$", "hooks": [{"type": "mcp_tool", "server": "terminalhook", "tool": "prepare_task", "input": {"session_id": "${session_id}", "turn_id": "${turn_id}", "tool_input": "${tool_input}"}, "timeout": 10}]}],
+    "Stop": [{"hooks": [{"type": "mcp_tool", "server": "terminalhook", "tool": "await_tasks", "input": {"session_id": "${session_id}", "turn_id": "${turn_id}"}, "timeout": 650, "statusMessage": "TerminalHook is waiting locally for background tasks"}]}],
+    "PreModelRequest": [{"hooks": [{"type": "mcp_tool", "server": "terminalhook", "tool": "audit_event", "input": {"session_id": "${session_id}", "turn_id": "${turn_id}", "event": "model_request_started"}, "timeout": 10}]}],
+    "PostModelRequest": [{"hooks": [{"type": "mcp_tool", "server": "terminalhook", "tool": "audit_event", "input": {"session_id": "${session_id}", "turn_id": "${turn_id}", "event": "model_request_finished"}, "timeout": 10}]}]
+  }
+}

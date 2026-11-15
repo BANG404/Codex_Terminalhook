@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [alpha, beta, rc, main]
+  pull_request:
+    branches: [alpha, beta, rc, main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      long_wait:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  quality:
+    name: Quality checks
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Check stage promotion and release metadata
+        shell: pwsh
+        run: |
+          python scripts/check_promotion.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/check_metadata.py
+      - name: Install the pinned Rust toolchain
+        shell: pwsh
+        run: rustup show active-toolchain
+      - name: Check Rust formatting
+        run: cargo fmt --check
+      - name: Check Rust lints
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Rust unit tests
+        run: cargo test --locked
+      - name: Build protocol test binary
+        run: cargo build --locked
+      - name: Protocol, hook and release policy tests
+        run: python -m unittest discover -s tests -v
+      - name: Long wait regression tests
+        if: inputs.long_wait == true
+        shell: pwsh
+        run: |
+          $env:TERMINALHOOK_LONG_WAIT = '1'
+          python -m unittest discover -s tests -k test_wait_over_default_client_timeout -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -k test_powershell_utf8_long_wait -v
+  package:
+    name: Package verification
+    needs: quality
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Build the exact source with its channel version
+        shell: pwsh
+        run: ./scripts/package.ps1
+      - name: Exercise the packaged binary and verify its license and manifest
+        run: python scripts/verify_hook_package.py
+      - name: Upload the verified Windows distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: terminalhook-windows-x64
+          path: |
+            dist/terminalhook-windows-x64.zip
+            dist/SHA256SUMS.txt
+            dist/build-info.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload protocol verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-verification
+          path: |
+            artifacts/stop-hook-protocol-tests.log
+            artifacts/stop-hook-validation.json
+          if-no-files-found: ignore

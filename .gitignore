@@ -1,0 +1,6 @@
+/target/
+/artifacts/
+/dist/
+/plugins/terminalhook/bin/
+__pycache__/
+/.codex/

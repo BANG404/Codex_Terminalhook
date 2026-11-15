@@ -1,0 +1,14 @@
+{
+  "name": "terminalhook",
+  "version": "0.3.1",
+  "description": "Wait locally for terminal events and continue desktop agents through synchronous Stop hooks.",
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "TerminalHook",
+    "shortDescription": "Wait for terminal output without polling",
+    "longDescription": "Submit background commands and let synchronous Stop hooks wait locally before continuing the agent. Includes model-request audit events, output matching, interactive terminals and process-tree cleanup.",
+    "category": "Developer Tools"
+  }
+}
