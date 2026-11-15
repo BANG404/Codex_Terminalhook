@@ -120,7 +120,9 @@ jobs:
   build:
     name: Native package (${{ matrix.platform }})
     needs: [policy, quality]
-    if: needs.quality.result == 'success' && (needs.policy.outputs.full == 'true' || inputs.build_package == true)
+    # CD reuses source tests, so its test job is intentionally skipped. Override
+    # implicit success() propagation while still requiring successful real gates.
+    if: ${{ !cancelled() && needs.policy.result == 'success' && needs.quality.result == 'success' && (needs.policy.outputs.full == 'true' || inputs.build_package == true) }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.policy.outputs.matrix) }}
