@@ -1,19 +1,31 @@
 name: CI
 
 on:
-  push:
-    branches: [alpha, beta, rc, main]
   pull_request:
     branches: [alpha, beta, rc, main]
   workflow_dispatch:
+    inputs:
+      build_package:
+        description: Build a channel package after verifying existing alpha evidence
+        type: boolean
+        default: false
   workflow_call:
     inputs:
+      build_package:
+        type: boolean
+        default: false
       long_wait:
         type: boolean
         default: false
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONUTF8: '1'
@@ -21,8 +33,12 @@ env:
 jobs:
   quality:
     name: Quality checks
-    runs-on: windows-2025
+    runs-on: ${{ github.event_name == 'pull_request' && github.base_ref == 'alpha' && 'windows-2025' || 'ubuntu-24.04' }}
     timeout-minutes: 25
+    outputs:
+      full: ${{ steps.mode.outputs.full }}
+      verified_run_url: ${{ steps.inherited.outputs.verified_run_url }}
+      archive_sha256: ${{ steps.inherited.outputs.archive_sha256 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -31,52 +47,91 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
-      - name: Check stage promotion and release metadata
-        shell: pwsh
+      - name: Choose full validation only for alpha PRs
+        id: mode
+        shell: bash
+        env:
+          FULL: ${{ github.event_name == 'pull_request' && github.base_ref == 'alpha' }}
+        run: echo "full=$FULL" >> "$GITHUB_OUTPUT"
+      - name: Check promotion policy and metadata
+        shell: bash
         run: |
           python scripts/check_promotion.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/check_metadata.py
+      - name: Reuse the alpha source and package verification
+        id: inherited
+        if: steps.mode.outputs.full != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/verify_promotion.py
+      - name: Upload promotion evidence
+        if: steps.mode.outputs.full != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: promotion-validation
+          path: artifacts/promotion-validation.json
+          if-no-files-found: error
       - name: Install the pinned Rust toolchain
-        shell: pwsh
+        if: steps.mode.outputs.full == 'true'
         run: rustup show active-toolchain
       - name: Check Rust formatting
+        if: steps.mode.outputs.full == 'true'
         run: cargo fmt --check
       - name: Check Rust lints
+        if: steps.mode.outputs.full == 'true'
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Rust unit tests
+        if: steps.mode.outputs.full == 'true'
         run: cargo test --locked
       - name: Build protocol test binary
+        if: steps.mode.outputs.full == 'true'
         run: cargo build --locked
       - name: Protocol and release policy tests
+        if: steps.mode.outputs.full == 'true'
         run: python -m unittest discover -s tests -v
-      - name: Long wait regression tests
-        if: inputs.long_wait == true
-        shell: pwsh
-        run: |
-          $env:TERMINALHOOK_LONG_WAIT = '1'
-          python -m unittest discover -s tests -k test_wait_over_default_client_timeout -v
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m unittest discover -s tests -k test_powershell_utf8_long_wait -v
   package:
     name: Package verification
     needs: quality
-    runs-on: windows-2025
+    runs-on: ${{ (needs.quality.outputs.full == 'true' || inputs.build_package == true) && 'windows-2025' || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
+      - name: Retain the verified alpha package identity
+        if: needs.quality.outputs.full != 'true' && inputs.build_package != true
+        env:
+          VERIFIED_RUN: ${{ needs.quality.outputs.verified_run_url }}
+          ARCHIVE_SHA256: ${{ needs.quality.outputs.archive_sha256 }}
+        run: |
+          echo "Reusing verified package: $VERIFIED_RUN"
+          echo "Original archive SHA256: $ARCHIVE_SHA256"
+          echo "No compilation or protocol tests are repeated for this promotion."
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
         with:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
         with:
           python-version: '3.13'
       - name: Build the exact source with its channel version
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
         shell: pwsh
         run: ./scripts/package.ps1
-      - name: Exercise the packaged binary and verify its license and manifest
+      - name: Exercise the final packaged binary
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
         run: python scripts/verify_package.py
+      - name: Explicit release long-wait regressions on the packaged binary
+        if: inputs.long_wait == true && inputs.build_package == true
+        shell: pwsh
+        env:
+          TERMINALHOOK_EXE: ${{ github.workspace }}/target/release/terminalhook.exe
+          TERMINALHOOK_LONG_WAIT: '1'
+        run: |
+          python -m unittest discover -s tests -k test_wait_over_default_client_timeout -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -k test_powershell_utf8_long_wait -v
       - name: Upload the verified Windows distribution
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: terminalhook-windows-x64
@@ -86,8 +141,8 @@ jobs:
             dist/build-info.json
           if-no-files-found: error
           retention-days: 14
-      - name: Upload protocol verification evidence
-        if: always()
+      - name: Upload package verification evidence
+        if: always() && (needs.quality.outputs.full == 'true' || inputs.build_package == true)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: package-verification
@@ -95,3 +150,4 @@ jobs:
             artifacts/package-protocol-tests.log
             artifacts/package-validation.json
           if-no-files-found: ignore
+          retention-days: 14

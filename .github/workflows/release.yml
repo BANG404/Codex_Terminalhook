@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -36,6 +38,7 @@ jobs:
     needs: request
     uses: ./.github/workflows/ci.yml
     with:
+      build_package: true
       long_wait: true
   publish:
     name: Publish verified distribution
