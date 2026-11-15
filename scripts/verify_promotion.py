@@ -8,6 +8,8 @@ import re
 import subprocess
 import tempfile
 
+from distribution import PLATFORMS
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -18,15 +20,25 @@ def git(*args):
 def validate_report(report, tree, artifacts):
     if not report.get("passed") or report.get("source_tree") != tree:
         raise ValueError("Package evidence does not verify the promoted source tree")
-    for key in ("archive_sha256", "binary_sha256"):
-        if not re.fullmatch(r"[0-9a-f]{64}", report.get(key, "")):
-            raise ValueError("Missing package integrity evidence")
     if not re.fullmatch(r"[0-9a-f]{40}", report.get("source_revision", "")):
         raise ValueError("Missing tested source revision")
-    distribution = next((a for a in artifacts if a["name"] == "terminalhook-windows-x64" and not a["expired"]), None)
-    if distribution is None:
-        raise ValueError("The verified distribution is missing or expired; rerun alpha CI")
-    return distribution["id"]
+    platforms = report.get("platforms", {})
+    if set(platforms) != set(PLATFORMS):
+        raise ValueError("Package evidence must cover every supported platform")
+    identities = {}
+    for target in PLATFORMS:
+        native = platforms[target]
+        if (not native.get("passed") or native.get("platform") != target or native.get("source_tree") != tree
+                or native.get("source_revision") != report["source_revision"]):
+            raise ValueError("Native package evidence differs from promoted source")
+        for key in ("archive_sha256", "binary_sha256"):
+            if not re.fullmatch(r"[0-9a-f]{64}", native.get(key, "")):
+                raise ValueError("Missing package integrity evidence")
+        distribution = next((a for a in artifacts if a["name"] == "terminalhook-" + target and not a["expired"]), None)
+        if distribution is None:
+            raise ValueError("A verified distribution is missing or expired; rerun alpha CI")
+        identities[target] = distribution["id"]
+    return identities
 
 
 def promotion_tree(checkout_tree, source_tree):
@@ -53,7 +65,7 @@ class GitHub:
             if run["head_sha"] != candidate or run.get("conclusion") != "success":
                 continue
             artifacts = self.api(f"actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]
-            if not any(a["name"] == "terminalhook-windows-x64" and not a["expired"] for a in artifacts):
+            if not all(any(a["name"] == "terminalhook-" + target and not a["expired"] for a in artifacts) for target in PLATFORMS):
                 continue  # Lightweight promotion runs do not produce a new binary.
             if not any(a["name"] == "package-verification" and not a["expired"] for a in artifacts):
                 continue
@@ -69,11 +81,11 @@ class GitHub:
                 report = json.loads(evidence.read_text(encoding="utf-8"))
             if report.get("source_tree") != tree:
                 continue
-            artifact_id = validate_report(report, tree, artifacts)
+            artifact_ids = validate_report(report, tree, artifacts)
             return {"passed": True, "verification": "reused_alpha_package", "source_tree": tree,
                     "tested_revision": report["source_revision"], "verified_run_id": run["id"],
-                    "verified_run_url": run["html_url"], "distribution_artifact_id": artifact_id,
-                    "archive_sha256": report["archive_sha256"], "rebuilt": False}
+                    "verified_run_url": run["html_url"], "distribution_artifact_ids": artifact_ids,
+                    "archive_sha256": {target: native["archive_sha256"] for target, native in report["platforms"].items()}, "rebuilt": False}
         return None
 
 
@@ -122,7 +134,8 @@ def main():
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             for key in ("verified_run_id", "verified_run_url", "archive_sha256"):
-                output.write(f"{key}={proof[key]}\n")
+                value = json.dumps(proof[key]) if isinstance(proof[key], dict) else proof[key]
+                output.write(f"{key}={value}\n")
     print(json.dumps(proof, indent=2))
 
 

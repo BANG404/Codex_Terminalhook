@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+from distribution_fixtures import archive_data, package_data, write_release
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location("publish_marketplace", SCRIPTS / "publish_marketplace.py")
@@ -22,13 +24,7 @@ class MarketplacePublicationTests(unittest.TestCase):
     def setUp(self):
         self.info = {"version": "0.4.0-alpha.2.gbbbbbbbbbbbb", "baseVersion": "0.4.0",
                      "channel": "alpha", "revision": "b" * 40, "dirty": False}
-        self.files = {name: b"runtime asset" for name in publisher.PACKAGE_FILES}
-        self.files["build-info.json"] = json.dumps(self.info).encode()
-        self.files["plugins/terminalhook/.codex-plugin/plugin.json"] = json.dumps(
-            {"name": "terminalhook", "version": self.info["version"]}).encode()
-        self.files[".agents/plugins/marketplace.json"] = json.dumps({"name": "terminalhook-local", "plugins": [
-            {"name": "terminalhook", "source": {"source": "local", "path": "./plugins/terminalhook"}}]}).encode()
-        self.files["plugins/terminalhook/bin/terminalhook.exe"] = b"MZ verified binary"
+        self.files = package_data(self.info)
         self.writes = []
         self.previous = None
 
@@ -37,7 +33,7 @@ class MarketplacePublicationTests(unittest.TestCase):
             if path == "git/commits/parent":
                 return {"tree": {"sha": "old-tree"}}
             if path == "git/trees/old-tree?recursive=1":
-                return {"tree": [{"path": name, "sha": publisher.blob_sha(data), "type": "blob", "mode": "100644"}
+                return {"tree": [{"path": name, "sha": publisher.blob_sha(data), "type": "blob", "mode": publisher.git_mode(name)}
                                  for name, data in self.previous.items()]}
             if path.startswith("git/blobs/"):
                 return {"content": base64.b64encode(self.previous["build-info.json"]).decode()}
@@ -59,12 +55,7 @@ class MarketplacePublicationTests(unittest.TestCase):
         self.previous["build-info.json"] = json.dumps(old).encode()
 
     def archive(self, files=None):
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as package:
-            for name, data in (self.files if files is None else files).items():
-                package.writestr(name, data)
-        buffer.seek(0)
-        return buffer
+        return archive_data(self.files if files is None else files)
 
     def test_first_publish_contains_binary_and_has_no_source_history(self):
         result = self.publish()
@@ -151,18 +142,15 @@ class MarketplacePublicationTests(unittest.TestCase):
                 task_root = Path(directory)
                 dist = task_root / "dist"
                 dist.mkdir()
-                archive = dist / "terminalhook-windows-x64.zip"
-                archive.write_bytes(self.archive().getvalue())
-                checksum = publisher.hashlib.sha256(archive.read_bytes()).hexdigest()
-                (dist / "SHA256SUMS.txt").write_text(checksum + "  " + archive.name + "\n")
-                (dist / "build-info.json").write_text(json.dumps(self.info))
+                write_release(task_root, self.info)
 
                 def gh(*args):
                     if args[:2] == ("release", "view"):
                         return SimpleNamespace(stdout=json.dumps({"isDraft": draft, "isPrerelease": True}))
                     self.assertEqual(args[:2], ("release", "download"))
-                    destination = Path(args[args.index("--dir") + 1]) / archive.name
-                    destination.write_bytes(b"changed" if changed_asset else archive.read_bytes())
+                    name = args[args.index("--pattern") + 1]
+                    destination = Path(args[args.index("--dir") + 1]) / name
+                    destination.write_bytes(b"changed" if changed_asset else (dist / name).read_bytes())
 
                 with patch.object(publisher, "ROOT", task_root), \
                         patch.object(publisher, "build_info", return_value=self.info), \
@@ -177,9 +165,20 @@ class MarketplacePublicationTests(unittest.TestCase):
                         publish.assert_not_called()
                     else:
                         publisher.main()
-                        publish.assert_called_once()
-                        files = publish.call_args.args[1]
+                        self.assertEqual(publish.call_count, 5)
+                        files = publish.call_args_list[0].args[1]
                         self.assertEqual(files["SHA256SUMS.txt"], (dist / "SHA256SUMS.txt").read_bytes())
+
+    def test_unix_marketplace_uses_platform_ref_and_executable_git_modes(self):
+        self.files = package_data(self.info, "linux-arm64")
+        with patch.object(publisher, "read_ref", return_value=None), patch.object(publisher, "api", side_effect=self.api):
+            result = publisher.publish(self.info, self.files, "linux-arm64")
+        self.assertEqual(result["branch"], "marketplace-alpha-linux-arm64")
+        tree = next(body for path, body, _ in self.writes if path == "git/trees")
+        modes = {entry["path"]: entry["mode"] for entry in tree["tree"]}
+        self.assertEqual(modes["plugins/terminalhook/bin/terminalhook"], "100755")
+        self.assertEqual(modes["install.sh"], "100755")
+        self.assertEqual(modes["install.py"], "100644")
 
 
 if __name__ == "__main__":

@@ -6,47 +6,14 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-import zipfile
 
 from publish_release import REPOSITORY, api, gh
 from version import ROOT, build_info
+from distribution import (CHANNELS, PLATFORMS, archive_name, expected_files, git_mode,
+                          marketplace_branch, package_files, release_assets)
 
-BRANCHES = {"production": "marketplace", "alpha": "marketplace-alpha",
-            "beta": "marketplace-beta", "rc": "marketplace-rc"}
-PACKAGE_FILES = {
-    ".agents/plugins/marketplace.json", "build-info.json", "LICENSE",
-    "README.md", "README.zh-CN.md", "install.ps1", "Enable-DirectTools.ps1",
-    "plugins/terminalhook/.codex-plugin/plugin.json", "plugins/terminalhook/.mcp.json",
-    "plugins/terminalhook/bin/terminalhook.exe",
-    "plugins/terminalhook/skills/terminal-wait/SKILL.md",
-    "plugins/terminalhook/skills/terminal-wait/scripts/Initialize-Utf8.ps1",
-}
-
-
-def package_files(archive, info):
-    """Only distribute the complete frozen package, never arbitrary ZIP paths or Git hooks."""
-    with zipfile.ZipFile(archive) as package:
-        entries = package.infolist()
-        if {entry.filename for entry in entries} != PACKAGE_FILES or len(entries) != len(PACKAGE_FILES):
-            raise ValueError("Unexpected, missing, or duplicate distribution files")
-        for entry in entries:
-            mode = entry.external_attr >> 16
-            if entry.is_dir() or (mode & 0o170000) not in (0, 0o100000):
-                raise ValueError("Distribution must contain only regular files")
-        files = {entry.filename: package.read(entry) for entry in entries}
-    if json.loads(files["build-info.json"]) != info:
-        raise ValueError("Packaged source identity differs")
-    manifest = json.loads(files["plugins/terminalhook/.codex-plugin/plugin.json"])
-    if manifest["name"] != "terminalhook" or manifest["version"] != info["version"] or "hooks" in manifest:
-        raise ValueError("Packaged plugin identity differs")
-    catalog = json.loads(files[".agents/plugins/marketplace.json"])
-    if (catalog["name"] != "terminalhook-local" or len(catalog["plugins"]) != 1
-            or catalog["plugins"][0]["name"] != "terminalhook"
-            or catalog["plugins"][0]["source"] != {"source": "local", "path": "./plugins/terminalhook"}):
-        raise ValueError("Packaged marketplace identity differs")
-    if not files["plugins/terminalhook/bin/terminalhook.exe"].startswith(b"MZ"):
-        raise ValueError("Missing Windows binary")
-    return files
+BRANCHES = CHANNELS
+PACKAGE_FILES = expected_files("windows-x64")
 
 
 def blob_sha(data):
@@ -62,8 +29,8 @@ def read_ref(branch):
     return json.loads(result.stdout)["object"]["sha"]
 
 
-def publish(info, files):
-    branch = BRANCHES[info["channel"]]
+def publish(info, files, target="windows-x64"):
+    branch = marketplace_branch(info["channel"], target)
     parent = read_ref(branch)
     if parent:
         commit = api("git/commits/" + parent)
@@ -79,7 +46,7 @@ def publish(info, files):
         previous = json.loads(base64.b64decode(old_blob["content"]))
         expected = {name: blob_sha(data) for name, data in files.items()}
         if (set(old_files) == set(expected)
-                and all(old_files[name]["sha"] == sha and old_files[name]["mode"] == "100644"
+                and all(old_files[name]["sha"] == sha and old_files[name]["mode"] == git_mode(name)
                         for name, sha in expected.items())
                 and all(e["type"] in {"blob", "tree"} for e in tree["tree"])):
             return {"branch": branch, "commit": parent, "alreadyPublished": True}
@@ -98,7 +65,7 @@ def publish(info, files):
         blob = api("git/blobs", {"content": base64.b64encode(data).decode(), "encoding": "base64"})
         if blob["sha"] != blob_sha(data):
             raise ValueError("Uploaded Git blob differs from verified package")
-        entries.append({"path": name, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+        entries.append({"path": name, "mode": git_mode(name), "type": "blob", "sha": blob["sha"]})
     # No base_tree: obsolete files are removed instead of leaking into future packages.
     tree = api("git/trees", {"tree": entries})
     commit = api("git/commits", {
@@ -119,21 +86,24 @@ def main():
     channel = os.environ["RELEASE_CHANNEL"]
     info = json.loads((ROOT / "dist/build-info.json").read_text(encoding="utf-8"))
     assert channel in BRANCHES and info == build_info(channel) and not info["dirty"]
-    archive = ROOT / "dist/terminalhook-windows-x64.zip"
-    checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+    release_assets(ROOT / "dist", info)
     sums = ROOT / "dist/SHA256SUMS.txt"
-    assert sums.read_text().split() == [checksum, archive.name]
-    files = package_files(archive, info)
-    files[sums.name] = sums.read_bytes()
+    packages = {target: package_files(ROOT / "dist" / archive_name(target), info, target) for target in PLATFORMS}
     tag = "v" + info["version"]
     release = json.loads(gh("release", "view", tag, "--repo", REPOSITORY,
                             "--json", "isDraft,isPrerelease").stdout)
     assert not release["isDraft"] and release["isPrerelease"] == (channel != "production")
     # A standalone retry must prove it is publishing the immutable released ZIP too.
     with tempfile.TemporaryDirectory() as directory:
-        gh("release", "download", tag, "--repo", REPOSITORY, "--pattern", archive.name, "--dir", directory)
-        assert hashlib.sha256((Path(directory) / archive.name).read_bytes()).hexdigest() == checksum
-    print(json.dumps(publish(info, files), indent=2))
+        for target in PLATFORMS:
+            archive = ROOT / "dist" / archive_name(target)
+            gh("release", "download", tag, "--repo", REPOSITORY, "--pattern", archive.name, "--dir", directory)
+            assert hashlib.sha256((Path(directory) / archive.name).read_bytes()).digest() == hashlib.sha256(archive.read_bytes()).digest()
+    results = []
+    for target, files in packages.items():
+        files[sums.name] = sums.read_bytes()
+        results.append(publish(info, files, target))
+    print(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":

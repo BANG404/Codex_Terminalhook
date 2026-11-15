@@ -1,27 +1,32 @@
 import importlib.util
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 spec = importlib.util.spec_from_file_location("promotion_proof", Path(__file__).resolve().parents[1] / "scripts/verify_promotion.py")
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
+sys.path.pop(0)
 
 
 class PromotionProofTests(unittest.TestCase):
     def setUp(self):
         self.tree = "a" * 40
         self.report = dict(passed=True, source_tree=self.tree, source_revision="b" * 40,
-                           archive_sha256="c" * 64, binary_sha256="d" * 64)
-        self.artifacts = [dict(id=7, name="terminalhook-windows-x64", expired=False)]
+                           platforms={target: dict(passed=True, platform=target, source_tree=self.tree,
+                                      source_revision="b" * 40, archive_sha256="c" * 64, binary_sha256="d" * 64)
+                                      for target in proof.PLATFORMS})
+        self.artifacts = [dict(id=index + 7, name="terminalhook-" + target, expired=False) for index, target in enumerate(proof.PLATFORMS)]
 
     def test_validated_package_keeps_original_artifact_identity(self):
-        self.assertEqual(proof.validate_report(self.report, self.tree, self.artifacts), 7)
+        self.assertEqual(proof.validate_report(self.report, self.tree, self.artifacts), dict(zip(proof.PLATFORMS, range(7, 12))))
 
     def test_rejects_changed_merge_tree_or_package_evidence(self):
         with self.assertRaises(ValueError):
             proof.promotion_tree(self.tree, "b" * 40)
-        for change in (dict(passed=False), dict(source_tree="b" * 40), dict(source_revision=""), dict(archive_sha256="")):
+        for change in (dict(passed=False), dict(source_tree="b" * 40), dict(source_revision=""), dict(platforms={})):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 proof.validate_report(dict(self.report, **change), self.tree, self.artifacts)
 
@@ -29,6 +34,15 @@ class PromotionProofTests(unittest.TestCase):
         for artifacts in ([], [dict(self.artifacts[0], expired=True)]):
             with self.assertRaises(ValueError):
                 proof.validate_report(self.report, self.tree, artifacts)
+
+    def test_one_missing_or_mismatched_platform_blocks_promotion(self):
+        for target in proof.PLATFORMS:
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                proof.validate_report(self.report, self.tree, [a for a in self.artifacts if a["name"] != "terminalhook-" + target])
+            native = dict(self.report["platforms"][target], source_tree="e" * 40)
+            report = dict(self.report, platforms=dict(self.report["platforms"], **{target: native}))
+            with self.assertRaises(ValueError):
+                proof.validate_report(report, self.tree, self.artifacts)
 
     def test_requires_both_successful_jobs(self):
         jobs = [dict(name="Quality checks", conclusion="success"), dict(name="Package verification", conclusion="success")]

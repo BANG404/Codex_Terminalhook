@@ -6,7 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import zipfile
+
+from distribution import archive_name, binary_name, extract_package, host_platform, mcp_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,13 +17,13 @@ def digest(path):
 
 
 def main():
-    archive = ROOT / "dist/terminalhook-windows-x64.zip"
+    target = host_platform()
+    archive = ROOT / "dist" / archive_name(target)
     artifacts = ROOT / "artifacts"
     artifacts.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="terminalhook direct package ") as directory:
         unpacked = Path(directory)
-        with zipfile.ZipFile(archive) as package:
-            package.extractall(unpacked)
+        extract_package(archive, unpacked)
         plugin = unpacked / "plugins/terminalhook"
         info = json.loads((unpacked / "build-info.json").read_text(encoding="utf-8"))
         assert (unpacked / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
@@ -33,8 +34,11 @@ def main():
         assert "hooks" not in manifest
         assert not (plugin / "hooks").exists(), "Obsolete hooks must not ship"
         assert (unpacked / "Enable-DirectTools.ps1").is_file()
-        binary = plugin / "bin/terminalhook.exe"
-        assert digest(binary) == digest(ROOT / "target/release/terminalhook.exe")
+        assert json.loads((unpacked / "platform.json").read_text())["platform"] == target
+        assert json.loads((plugin / ".mcp.json").read_text()) == mcp_config(target)
+        binary = plugin / "bin" / binary_name(target)
+        assert digest(binary) == digest(ROOT / "target/release" / binary_name(target))
+        assert os.access(binary, os.X_OK), "Extracted native binary is not executable"
         assert subprocess.check_output([str(binary), "--version"], text=True).strip() == "terminalhook " + manifest["version"]
         environment = os.environ.copy()
         environment.update(TERMINALHOOK_EXE=str(binary),
@@ -45,7 +49,7 @@ def main():
                                cwd=ROOT, env=environment, text=True, encoding="utf-8", capture_output=True, timeout=120)
         (artifacts / "package-protocol-tests.log").write_text(tests.stdout + tests.stderr, encoding="utf-8")
         assert tests.returncode == 0, tests.stdout + tests.stderr
-        summary = {"passed": True, "version": manifest["version"], "archive_sha256": digest(archive),
+        summary = {"passed": True, "platform": target, "version": manifest["version"], "archive_sha256": digest(archive),
                    "source_revision": info["revision"],
                    "source_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip(),
                    "binary_sha256": digest(binary), "hook_events": [], "default_route": "direct",

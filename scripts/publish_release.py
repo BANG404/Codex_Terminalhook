@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 
 from version import ROOT, build_info
+from distribution import release_assets
 
 REPOSITORY = "BANG404/Codex_Terminalhook"
 
@@ -34,13 +35,11 @@ def main():
     info = json.loads((ROOT / "dist/build-info.json").read_text(encoding="utf-8"))
     assert info == build_info(channel), "Downloaded build identity differs from the checked source"
     assert not info["dirty"] and channel != "development"
-    archive = ROOT / "dist/terminalhook-windows-x64.zip"
-    checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
-    assert (ROOT / "dist/SHA256SUMS.txt").read_text().split() == [checksum, archive.name]
+    assets = release_assets(ROOT / "dist", info)
+    checksums = (ROOT / "dist/SHA256SUMS.txt").read_text(encoding="utf-8")
     tag = "v" + info["version"]
     prerelease = channel != "production"
-    notes = f"TerminalHook {info['version']}\n\nChannel: {channel}\nSource: {info['revision']}\nSHA256: {checksum}\nLicense: MIT\n"
-    assets = [archive, ROOT / "dist/SHA256SUMS.txt", ROOT / "dist/build-info.json"]
+    notes = f"TerminalHook {info['version']}\n\nChannel: {channel}\nSource: {info['revision']}\nLicense: MIT\n\nSHA256:\n{checksums}"
     ref = gh("api", f"repos/{REPOSITORY}/git/ref/tags/{tag}", check=False)
     if ref.returncode:
         assert "404" in ref.stderr, ref.stderr
