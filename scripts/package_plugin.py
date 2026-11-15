@@ -30,7 +30,7 @@ def main():
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (destination / ".agents/plugins").mkdir(parents=True)
     for source, target in ((".agents/plugins/marketplace.json", ".agents/plugins/marketplace.json"),
-                           ("scripts/install.ps1", "install.ps1"), ("examples/PACKAGE_README.md", "README.md"),
+                           ("scripts/install.ps1", "install.ps1"), ("scripts/Enable-DirectTools.ps1", "Enable-DirectTools.ps1"), ("examples/PACKAGE_README.md", "README.md"),
                            ("LICENSE", "LICENSE"), ("dist/build-info.json", "build-info.json")):
         shutil.copyfile(ROOT / source, destination / target)
     archive = dist / "terminalhook-windows-x64.zip"
