@@ -42,7 +42,7 @@ jobs:
       long_wait: true
   publish:
     name: Publish verified distributions
-    if: inputs.publish && github.repository == 'BANG404/Codex_Terminalhook'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && inputs.publish && github.repository == 'BANG404/Codex_Terminalhook' }}
     needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 20
