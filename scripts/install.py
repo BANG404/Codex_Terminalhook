@@ -106,18 +106,21 @@ def install(source=None, channel="production", git_source="https://github.com/BA
         raise ValueError("Ambiguous marketplace registration")
     restore = None
     if existing:
-        previous = existing[0]
-        if previous.get("marketplaceSource"):
-            registration = configure(read_marketplace=True)
-            if not registration or registration.get("source_type") != "git":
-                raise ValueError("Cannot read the previous Git registration")
+        # Catalog metadata can be nonempty for local sources too. The user config
+        # is authoritative and preserves Git refs/sparse paths as well as local roots.
+        registration = configure(read_marketplace=True)
+        if not registration or not isinstance(registration.get("source"), str):
+            raise ValueError("Cannot read the previous marketplace registration")
+        if registration.get("source_type") == "git":
             restore = [registration["source"]]
             if registration.get("ref"):
                 restore += ["--ref", registration["ref"]]
             for path in registration.get("sparse_paths") or []:
                 restore += ["--sparse", path]
+        elif registration.get("source_type") in (None, "local"):
+            restore = [registration["source"]]
         else:
-            restore = [previous["root"]]
+            raise ValueError("Unsupported previous marketplace source")
         cli("plugin", "marketplace", "remove", MARKETPLACE, "--json")
     added = None
     try:

@@ -69,6 +69,25 @@ class UnixInstallerTests(unittest.TestCase):
                                          "--sparse", "plugins", "--sparse", ".agents", "--json"))
             self.assertNotIn(("plugin", "add", "terminalhook@terminalhook-local", "--json"), calls)
 
+    def test_nonempty_local_catalog_metadata_uses_local_registration_for_rollback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = []
+            def cli(*args):
+                calls.append(args)
+                if args[:3] == ("plugin", "marketplace", "list"):
+                    return {"marketplaces": [{"name": "terminalhook-local", "root": "catalog root",
+                                              "marketplaceSource": {"sourceType": "local"}}]}
+                if args[:3] == ("plugin", "marketplace", "add"):
+                    return {"marketplaceName": "terminalhook-local", "installedRoot": str(root)}
+                return {}
+            registration = {"source": str(root / "previous local source")}
+            with patch.object(installer, "host_platform", return_value="linux-arm64"), \
+                    patch.object(installer, "cli", side_effect=cli), patch.object(installer, "configure", return_value=registration):
+                with self.assertRaisesRegex(ValueError, "compiled native binary"):
+                    installer.install(channel="rc")
+            self.assertEqual(calls[-1], ("plugin", "marketplace", "add", registration["source"], "--json"))
+
 
 if __name__ == "__main__":
     unittest.main()
