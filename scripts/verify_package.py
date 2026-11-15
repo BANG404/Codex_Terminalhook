@@ -44,6 +44,8 @@ def main():
         (artifacts / "package-protocol-tests.log").write_text(tests.stdout + tests.stderr, encoding="utf-8")
         assert tests.returncode == 0, tests.stdout + tests.stderr
         summary = {"passed": True, "version": manifest["version"], "archive_sha256": digest(archive),
+                   "source_revision": info["revision"],
+                   "source_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip(),
                    "binary_sha256": digest(binary), "hook_events": [], "default_route": "direct",
                    "packaged_binary_tests": "passed", "codex_cli_used": False,
                    "desktop_verified": False, "desktop_status": "protocol verification does not establish desktop model request counts"}
