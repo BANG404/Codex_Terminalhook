@@ -7,11 +7,11 @@ snapshot seeds all four branches with the same commit. Subsequent changes use PR
 
 | Source branch | Artifact version | GitHub Release |
 | --- | --- | --- |
-| alpha | `0.3.1-alpha.<commit-count>.g<12-char-sha>` | Prerelease |
-| beta | `0.3.1-beta.<commit-count>.g<12-char-sha>` | Prerelease |
-| rc | `0.3.1-rc.<commit-count>.g<12-char-sha>` | Prerelease |
-| main | `0.3.1` | Stable |
-| Feature branch / PR | `0.3.1-development.<commit-count>.g<12-char-sha>` | Not publishable |
+| alpha | `0.4.0-alpha.<commit-count>.g<12-char-sha>` | Prerelease |
+| beta | `0.4.0-beta.<commit-count>.g<12-char-sha>` | Prerelease |
+| rc | `0.4.0-rc.<commit-count>.g<12-char-sha>` | Prerelease |
+| main | `0.4.0` | Stable |
+| Feature branch / PR | `0.4.0-development.<commit-count>.g<12-char-sha>` | Not publishable |
 
 `Cargo.toml`, `Cargo.lock` and the source plugin manifest share a stable version
 baseline. Change them together for the next stable release. Channel suffixes are
@@ -22,7 +22,7 @@ dirty checkout, a mismatched source SHA or a mismatched channel/branch.
 ## CI
 
 GitHub-hosted Windows runners execute formatting, Clippy, Rust unit tests,
-Python protocol/hook/release-policy tests, and a separate distribution build.
+Python protocol/release-policy tests, and a separate distribution build.
 The packaged binary is tested from an extracted directory, including spaces in
 its path. Artifacts contain the ZIP, SHA256SUMS.txt and source build identity.
 Runtime artifacts, local chat traces, credentials and compiled binaries are not
@@ -58,15 +58,16 @@ an incomplete draft, but cannot replace an existing asset or retarget a tag.
 Stable releases also refuse to reuse a version for a different source commit.
 
 Publication uses GitHub's workflow token; no personal access token or external
-runner is required. Desktop Hook trust and absence of model requests must still
+runner is required. Direct tool exposure and absence of model requests must still
 be verified in the actual desktop app. Protocol CI does not pretend to prove
-desktop behavior; its report explicitly says desktop verification is pending.
+desktop behavior. The default package has no lifecycle hooks; the historical
+0.3.1 implementation is preserved on `legacy/stop-hook`.
 
 ## Local build
 
 ```powershell
 ./scripts/package.ps1 -Channel development
-python scripts/verify_hook_package.py
+python scripts/verify_package.py
 ```
 
 Builds are staged in `dist/package`, separate from the source plugin directory.

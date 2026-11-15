@@ -48,7 +48,7 @@ jobs:
         run: cargo test --locked
       - name: Build protocol test binary
         run: cargo build --locked
-      - name: Protocol, hook and release policy tests
+      - name: Protocol and release policy tests
         run: python -m unittest discover -s tests -v
       - name: Long wait regression tests
         if: inputs.long_wait == true
@@ -75,7 +75,7 @@ jobs:
         shell: pwsh
         run: ./scripts/package.ps1
       - name: Exercise the packaged binary and verify its license and manifest
-        run: python scripts/verify_hook_package.py
+        run: python scripts/verify_package.py
       - name: Upload the verified Windows distribution
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -92,6 +92,6 @@ jobs:
         with:
           name: package-verification
           path: |
-            artifacts/stop-hook-protocol-tests.log
-            artifacts/stop-hook-validation.json
+            artifacts/package-protocol-tests.log
+            artifacts/package-validation.json
           if-no-files-found: ignore

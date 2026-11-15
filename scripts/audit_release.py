@@ -15,7 +15,7 @@ def main():
     assert info == build_info(info["channel"]), "Build identity differs from the current source"
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
     assert (ROOT / "dist/SHA256SUMS.txt").read_text().split() == [checksum, archive.name]
-    evidence = json.loads((ROOT / "artifacts/stop-hook-validation.json").read_text(encoding="utf-8"))
+    evidence = json.loads((ROOT / "artifacts/package-validation.json").read_text(encoding="utf-8"))
     assert evidence["passed"] and evidence["version"] == info["version"]
     assert evidence["archive_sha256"] == checksum, "Protocol evidence belongs to another archive"
     with zipfile.ZipFile(archive) as package:
