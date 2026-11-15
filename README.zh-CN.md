@@ -5,7 +5,19 @@
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-本地 Rust MCP 服务和 Codex 插件。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。
+TerminalHook 是 Rust MCP 服务和 Codex 插件，支持事件驱动的终端等待与交互式进程控制。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。
+
+核心代码已包含 Windows 和 Unix 进程后端，支持管道与 PTY。当前端到端验证、安装器和发布的二进制覆盖 Windows x64；Linux 和 macOS 仍需补齐平台验证与安装分发，才能作为正式支持的发布目标。
+
+## 主要能力
+
+- **等待终端事件：** 使用 `run_until` 等待开发服务器的就绪 URL、构建结果或其他正则输出条件。
+- **接续读取输出：** 使用 `wait_output`、进程 ID 和游标，读取上次返回后收到的输出。
+- **控制交互命令：** 支持管道和 PTY 模式，使用 `write_input` 发送输入，并可在同一次调用中等待响应。
+- **管理进程生命周期：** 按需保留命令，或使用 `stop_process` 停止其进程树；原始输出保存到轮转日志。
+- **集成 Codex：** 安装包含 `terminal-wait` 技能的插件，或配置独立 MCP。当前版本使用直接工具调用，无需生命周期 Hook。
+
+[安装与升级](#安装与升级) · [工具参考](#原有终端工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
 
 ## 安装与升级
 

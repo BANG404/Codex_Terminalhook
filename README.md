@@ -5,7 +5,19 @@ English | [简体中文](README.zh-CN.md)
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A local Rust MCP server and Codex plugin. While a command runs, TerminalHook continuously reads its output and matches regular expressions. Each call waits until a match, exit, timeout, or cancellation. It does not return `pending`, request model sampling, or require repeated model queries while waiting.
+TerminalHook is a Rust MCP server and Codex plugin for event-driven terminal waits and interactive process control. While a command runs, it continuously reads its output and matches regular expressions. Each call waits until a match, exit, timeout, or cancellation. It does not return `pending`, request model sampling, or require repeated model queries while waiting.
+
+The core includes Windows and Unix process backends with pipe and PTY support. Current end-to-end validation, installers, and published binaries cover Windows x64. Linux and macOS still need platform validation and installation/distribution support before they can be advertised as supported release targets.
+
+## What it does
+
+- **Wait for terminal events:** watch for a development server's ready URL, a build result, or another regex output condition with `run_until`.
+- **Continue from saved output:** use `wait_output` with a process ID and cursor to consume output received since the previous result.
+- **Control interactive commands:** use pipe or PTY mode and send input with `write_input`, optionally waiting for the response in the same call.
+- **Manage process lifetime:** retain commands when needed, or stop their process trees with `stop_process`; raw output is saved to rotating logs.
+- **Integrate with Codex:** install the plugin with its `terminal-wait` skill or configure standalone MCP. Current versions use direct tool calls without lifecycle hooks.
+
+[Installation and upgrades](#installation-and-upgrades) · [Tool reference](#terminal-tools) · [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) · [Development and releases](docs/releasing.md)
 
 ## Installation and upgrades
 
