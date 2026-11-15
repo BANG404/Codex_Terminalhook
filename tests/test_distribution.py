@@ -73,6 +73,15 @@ class DistributionTests(unittest.TestCase):
         buffer.seek(0)
         with self.assertRaises(ValueError):
             dist.package_files(buffer, self.info, "linux-x64")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as package:
+            for name, data in files.items():
+                entry = zipfile.ZipInfo(name)
+                entry.external_attr = int("100644" if name == "install.sh" else dist.git_mode(name), 8) << 16
+                package.writestr(entry, data)
+        buffer.seek(0)
+        with self.assertRaisesRegex(ValueError, "permissions differ"):
+            dist.package_files(buffer, self.info, "linux-x64")
 
     def fixture(self, root):
         tree = "b" * 40

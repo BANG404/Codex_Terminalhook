@@ -481,7 +481,9 @@ class McpTests(unittest.TestCase):
     def test_cancel_cleans_pending_process_tree(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "pids"
-            code = f"import os,pathlib,subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)']); pathlib.Path({str(path)!r}).write_text(str(os.getpid())+','+str(p.pid)); time.sleep(120)"
+            # Publish readiness atomically; file creation alone can precede the PID write.
+            staging = path.with_suffix(".tmp")
+            code = f"import os,pathlib,subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)']); pathlib.Path({str(staging)!r}).write_text(str(os.getpid())+','+str(p.pid)); pathlib.Path({str(staging)!r}).replace({str(path)!r}); time.sleep(120)"
             self.client.run(code)
             # Test fixture readiness only; the MCP client does not poll tools.
             deadline = time.monotonic() + 5
