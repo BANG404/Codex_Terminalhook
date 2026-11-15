@@ -58,7 +58,7 @@ def main():
                                env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
         assert setup.returncode == 0, setup.stdout + setup.stderr
         assert config_path.read_bytes() == config_bytes, "Repeated setup changed user config"
-        assert Path(installed_config["marketplaces"]["terminalhook-local"]["source"]).resolve() == extracted.resolve()
+        assert os.path.samefile(installed_config["marketplaces"]["terminalhook-local"]["source"], extracted)
         # If the new source is invalid, source migration must restore the old one.
         broken_source = Path(directory) / "broken replacement marketplace"
         shutil.copytree(extracted, broken_source)
@@ -67,7 +67,7 @@ def main():
                                 cwd=extracted, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
         assert failed.returncode != 0, "Invalid marketplace source was accepted"
         restored = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert Path(restored["marketplaces"]["terminalhook-local"]["source"]).resolve() == extracted.resolve()
+        assert os.path.samefile(restored["marketplaces"]["terminalhook-local"]["source"], extracted)
         assert restored["plugins"]["terminalhook@terminalhook-local"]["enabled"]
         assert restored["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__existing", "mcp__terminalhook"]
         cli("plugin", "list", "--json")
