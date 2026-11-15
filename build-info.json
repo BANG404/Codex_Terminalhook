@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.0-alpha.38.ga942de8bdfec",
+  "baseVersion": "0.5.0",
+  "channel": "alpha",
+  "revision": "a942de8bdfecb26eba3a98d5d35f203d8a5b30fa",
+  "sequence": 38,
+  "sourceDateEpoch": 1794753314,
+  "builtAt": "2026-11-15T14:35:14+00:00",
+  "dirty": false
+}
