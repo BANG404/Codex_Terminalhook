@@ -9,11 +9,11 @@ snapshot seeds all four branches with the same commit. Subsequent changes use PR
 
 | Source branch | Artifact version | GitHub Release |
 | --- | --- | --- |
-| alpha | `0.4.0-alpha.<commit-count>.g<12-char-sha>` | Prerelease |
-| beta | `0.4.0-beta.<commit-count>.g<12-char-sha>` | Prerelease |
-| rc | `0.4.0-rc.<commit-count>.g<12-char-sha>` | Prerelease |
-| main | `0.4.0` | Stable |
-| Feature branch / PR | `0.4.0-development.<commit-count>.g<12-char-sha>` | Not publishable |
+| alpha | `0.5.0-alpha.<commit-count>.g<12-char-sha>` | Prerelease |
+| beta | `0.5.0-beta.<commit-count>.g<12-char-sha>` | Prerelease |
+| rc | `0.5.0-rc.<commit-count>.g<12-char-sha>` | Prerelease |
+| main | `0.5.0` | Stable |
+| Feature branch / PR | `0.5.0-development.<commit-count>.g<12-char-sha>` | Not publishable |
 
 `Cargo.toml`, `Cargo.lock` and the source plugin manifest share a stable version
 baseline. Change them together for the next stable release. Channel suffixes are
@@ -71,24 +71,41 @@ be inspected before removal. Run the focused regressions with
 
 ## CI
 
-Alpha PRs use Windows runners for formatting, Clippy, Rust unit tests,
-Python protocol/release-policy tests, and a separate distribution build.
-The packaged binary is tested from an extracted directory, including spaces in
-its path. Artifacts contain the ZIP, SHA256SUMS.txt and source build identity.
-Runtime artifacts, local chat traces, credentials and compiled binaries are not
-committed to source branches. Compiled binaries are committed only to dedicated
-marketplace distribution branches by the Release workflow. Actions are pinned to commit SHAs.
+Alpha PRs run formatting, Clippy, Rust unit tests, and Python protocol/release-policy
+tests on five native targets, followed by native package and installation checks:
+
+| Target | Native runner | Binary |
+| --- | --- | --- |
+| windows-x64 | windows-2025 | terminalhook.exe |
+| linux-x64 | ubuntu-24.04 | terminalhook |
+| linux-arm64 | ubuntu-24.04-arm | terminalhook |
+| macos-x64 | macos-15-intel | terminalhook |
+| macos-arm64 | macos-15 | terminalhook |
+
+Each binary is tested from an extracted directory with spaces in its path. Each
+target verifies isolated installation, configuration preservation, Git migration
+and rollback, startup updates, explicit upgrades, and the actual cached MCP launch
+command. ZIPs and Git trees retain executable permissions. Linux uses glibc built
+on Ubuntu 24.04; Alpine/musl and Windows ARM64 are outside the release matrix.
+macOS binaries are unsigned and not notarized.
 
 Required branch checks remain **Quality checks** and **Package verification**.
-Changes use PRs; push events no longer duplicate PR validation. Updated PRs
-cancel their obsolete CI runs. Alpha PRs run the full checks once. Promotion
-PRs on beta, rc and main use lightweight Linux jobs: enforce the stage order,
-require the merge tree to equal the source tree, locate a successful alpha CI
-package with exactly that tested tree, and retain its run/artifact/checksum
-identity. Missing, expired or mismatched evidence blocks promotion. No Rust
-compilation, protocol rerun or renamed binary occurs during promotion.
-`promotion-validation.json` links to the original evidence. A tree includes
-workflow and test files, so changing CI also requires a fresh alpha validation.
+They aggregate all native results and reject failed, cancelled, or unexpectedly
+skipped work. Only a complete five-platform archive and installation evidence set
+can produce `release-distributions` and the aggregate `package-verification` report.
+Changes use PRs; pushes do not duplicate validation, and updated PRs cancel obsolete
+runs. Actions are pinned to commit SHAs.
+
+Promotion PRs on beta, rc, and main use lightweight Linux jobs to enforce stage
+order, require the merge tree to equal the source tree, and locate a successful
+alpha CI run with that exact tested tree. Every platform's artifact, checksum,
+and source identity must be available and unexpired. Missing or mismatched evidence
+blocks promotion. No Rust compilation, protocol rerun, or binary relabeling occurs
+during promotion. `promotion-validation.json` retains the original evidence.
+Workflow and test changes are part of the tree and require fresh alpha validation.
+
+Compiled binaries, runtime logs, local chat traces, and credentials are excluded
+from source commits. Only Release writes binaries to dedicated marketplace branches.
 
 ## Promote source
 
@@ -106,73 +123,91 @@ The commands do not publish artifacts.
 ## CD / manual publication
 
 In GitHub Actions, select **Release**, choose the workflow branch and matching
-channel (`production` uses `main`). Leave **publish** disabled for an end-to-end
-validation run. Enable it explicitly to publish a GitHub Release and advance its Git marketplace channel.
+channel (`production` uses `main`). With **publish** disabled the workflow validates
+without changing release or marketplace refs. Enable it to publish the complete
+native platform set. All four stages use the same five-target matrix.
 
-The workflow checks the branch, reuses alpha source validation, builds the final
-channel version once and checks the packaged binary, including explicit
-65-second and 90-second wait regressions. It publishes that verified artifact;
-promotion never relabels an alpha binary as a stable one. A write-scoped
-job creates an annotated `v<version>` tag and uploads the distribution, checksum
-and build identity. Non-production releases are prereleases. A rerun may finish
-an incomplete draft, but cannot replace an existing asset or retarget a tag.
-Stable releases also refuse to reuse a version for a different source commit.
+The workflow checks the branch, reuses complete alpha source validation, and
+builds the final channel version once per target. Every packaged binary passes
+protocol, installation, Git update, explicit 65-second wait, and 90-second
+interactive UTF-8 regressions. Windows additionally runs the PowerShell UTF-8
+long-wait regression. Stage promotion does not relabel alpha binaries.
 
-After the immutable release is published, `scripts/publish_marketplace.py` verifies
-that the downloaded release ZIP matches the validated local artifact. It copies
-the ZIP's complete file set into a Git tree, including `terminalhook.exe`, plus
-the release `SHA256SUMS.txt`. It never compiles or downloads a different binary.
+The aggregate validates all source identities, checksums, native launch configs,
+binary formats, and executable permissions before publication. A release contains
+five `terminalhook-<platform>.zip` assets, one `SHA256SUMS.txt` covering all five,
+and the shared `build-info.json`. A write-scoped job creates an annotated
+`v<version>` tag. Non-production releases are prereleases. A retry may complete an
+unfinished draft but cannot replace assets, retarget tags, or reuse a stable
+version for different source. Missing platforms block writes before tag creation.
 
-| Release channel | Distribution branch | Installer option |
+After the immutable release is published, `scripts/publish_marketplace.py`
+downloads and verifies every released ZIP against its validated local artifact.
+It copies each complete package and the checksum manifest into its own Git branch,
+without compilation or binary substitution. Windows retains its historical refs:
+
+| Channel | Windows x64 branch | Windows installer option |
 | --- | --- | --- |
 | production | `marketplace` | default / `-Channel production` |
 | alpha | `marketplace-alpha` | `-Channel alpha` |
 | beta | `marketplace-beta` | `-Channel beta` |
 | rc | `marketplace-rc` | `-Channel rc` |
 
-The first distribution commit has no source-history parent. Later commits parent
-the current distribution head and update the branch without force. Concurrent
-writers are rejected. Identical reruns are no-ops; changed files for an existing
-version, source-history rollbacks, version downgrades, and cross-channel updates
-are rejected. Obsolete files do not carry over from the previous tree. Branches
-are created on the first publication, so a channel cannot be installed beforehand.
-Do not target these branches with source PRs or edit them manually. Repository
-rules must allow the release token to create and fast-forward these four branches.
+Unix branches append `-linux-x64`, `-linux-arm64`, `-macos-x64`, or `-macos-arm64`
+to the channel ref, for example `marketplace-alpha-macos-arm64`. Unix installers
+automatically choose the native ref with `--channel alpha/beta/rc/production`.
+All platforms preserve `terminalhook@terminalhook-local`. `source.path` is local
+within the Git snapshot; registration tracks a moving Git channel branch.
 
-A failed marketplace step leaves the already published immutable GitHub Release
-intact. Rerun the same Release request to finish distribution; it must not replace
-release assets or overwrite a newer marketplace head. With **publish** disabled,
-neither releases nor Git marketplace refs change.
+First distribution commits have no source-history parent. Later updates are
+fast-forwards from the current distribution head; concurrent writes are rejected.
+Identical retries are no-ops, including executable modes. Changed existing versions,
+source-history rollbacks, version downgrades, and cross-channel changes are rejected.
+Obsolete files are removed from new trees. Branches are created on first publication,
+so a platform/channel cannot be installed beforehand. Repository rules must permit
+the release token to create and advance the four Windows channel branches and
+their sixteen Unix variants. Do not submit source PRs to distribution branches.
 
-The catalog keeps the historical name `terminalhook-local`, preserving installed
-plugin IDs and settings. `source.path` is local **within the Git snapshot**; the
-marketplace registration itself is a Git URL with a moving channel branch, not
-a pinned release tag or commit. Codex owns startup refreshes and installed-cache
-updates. The project does not add an updater daemon or lifecycle hook.
+If marketplace publication fails partway through, the immutable release and
+completed platform refs remain. Retry the same Release request to finish missing
+refs; existing identical platforms are skipped, and newer heads are never overwritten.
 
-CI pins Codex CLI 0.167.0 for `scripts/verify_git_marketplace.py`. A loopback HTTP
-Git fixture verifies migration from a local install, failed-channel recovery,
-automatic app-server startup updates, and the official marketplace upgrade
-command replacing the binary. It uses an isolated Codex home and no model turns.
-This is not a claim that every desktop version hot-swaps active MCP connections.
+Codex owns startup refresh and installed-cache updates; there is no updater daemon
+or lifecycle hook. CI pins Codex CLI 0.167.0 and verifies local migration, failed-ref
+restoration, automatic app-server startup updates, the official upgrade command,
+and the actual cached MCP command against a loopback Git server on every target.
+Tests use isolated Codex homes and create no model turns. They do not establish
+desktop model request counts or promise live migration of active MCP sessions.
 
-Publication uses GitHub's workflow token; no personal access token or external
-runner is required. Direct tool exposure and absence of model requests must still
-be verified in the actual desktop app. Protocol CI does not pretend to prove
-desktop behavior. The default package has no lifecycle hooks; the historical
-0.3.1 implementation is preserved on `legacy/stop-hook`.
+Publication uses GitHub's workflow token without a PAT or external runner. Direct
+tool exposure and desktop behavior must still be verified in the actual app.
+The default package has no lifecycle hooks; the historical 0.3.1 implementation
+is preserved on `legacy/stop-hook`.
 
 ## Local build
+
+Build on the target OS/architecture with Python 3.11+ and the pinned Rust toolchain:
+
+```sh
+python3 scripts/package.py --channel development
+python3 scripts/verify_package.py
+sh scripts/install.sh --source ./dist/package
+```
+
+Windows retains the PowerShell wrappers:
 
 ```powershell
 ./scripts/package.ps1 -Channel development
 python scripts/verify_package.py
+./scripts/install.ps1 -Source ./dist/package
 ```
 
-Builds are staged in `dist/package`, separate from the source plugin directory.
-Use `./scripts/install.ps1 -Source ./dist/package` for a local installation and
-keep that directory available. Without `-Source`, the installer tracks the Git
-stable channel, even when run from a source checkout or extracted ZIP.
+Builds stage under `dist/package`, separate from the source plugin. Keep local
+installation directories available. Without `--source` / `-Source`, even an
+extracted package installer selects Git stable. Plugin installation requires
+Codex CLI; Git installation also requires Git. Unix installation uses Python
+3.11+ only for installation and Codex configuration editing. The installed Rust
+MCP binary has no Rust toolchain, Python, or Node dependency.
 
 ## License
 

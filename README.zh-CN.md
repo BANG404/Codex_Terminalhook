@@ -5,11 +5,23 @@
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-本地 Rust MCP 服务和 Codex 插件。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。
+TerminalHook 是 Rust MCP 服务和 Codex 插件，支持事件驱动的终端等待与交互式进程控制。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。
+
+原生测试和分发覆盖 Windows x64、Linux x64/ARM64，以及 macOS Intel/Apple Silicon。每个目标均运行 Rust 和 MCP 协议测试，并验证解压包、安装及 Git marketplace 更新。Windows 使用 Job Object 和 ConPTY；Linux/macOS 使用进程组和 Unix PTY。
+
+## 主要能力
+
+- **等待终端事件：** 使用 `run_until` 等待开发服务器的就绪 URL、构建结果或其他正则输出条件。
+- **接续读取输出：** 使用 `wait_output`、进程 ID 和游标，读取上次返回后收到的输出。
+- **控制交互命令：** 支持管道和 PTY 模式，使用 `write_input` 发送输入，并可在同一次调用中等待响应。
+- **管理进程生命周期：** 按需保留命令，或使用 `stop_process` 停止其进程树；原始输出保存到轮转日志。
+- **集成 Codex：** 安装包含 `terminal-wait` 技能的插件，或配置独立 MCP。当前版本使用直接工具调用，无需生命周期 Hook。
+
+[安装与升级](#安装与升级) · [工具参考](#原有终端工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
 
 ## 安装与升级
 
-TerminalHook 通过 Git marketplace 分发，包含编译好的 Windows x64 二进制、MCP 配置和运行期技能。稳定渠道跟踪本仓库的 `marketplace` 分支；预发布渠道分别跟踪 `marketplace-alpha`、`marketplace-beta` 或 `marketplace-rc`。各渠道在首次执行发布版 Release 工作流后可用。源码分支不包含编译后二进制，不能直接作为二进制 marketplace 安装。
+TerminalHook 通过 Git marketplace 分发，包含原生二进制、MCP 配置和运行期技能。安装器自动选择当前系统和架构。Windows 保留 `marketplace` 及 `marketplace-alpha/beta/rc`；Unix 分支在渠道分支后追加 `-linux-x64`、`-linux-arm64`、`-macos-x64` 或 `-macos-arm64`。各平台/渠道在首次执行发布版 Release 工作流后可用。源码分支不包含编译后二进制，不能直接作为二进制 marketplace 安装。
 
 开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。阶段包版本带提交序号和源码 SHA，发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.zh-CN.md)。项目使用 [MIT 许可证](LICENSE)。
 
@@ -23,7 +35,14 @@ pwsh -NoProfile -File scripts/install.ps1
 pwsh -NoProfile -File scripts/install.ps1 -Channel beta
 ```
 
-安装器注册 Git marketplace、安装并启用插件、配置原生直接调用。已有本地安装会迁移，保留 `terminalhook@terminalhook-local` 和其他用户设置。marketplace 名称保留历史 `-local` 后缀以兼容旧配置，实际来源为 Git。marketplace 注册失败会恢复原来源和跟踪分支。运行期需要 Windows 与 Codex CLI；Git 安装还需要 Git，不需要 Rust、Python 或 Node。
+Linux 或 macOS 使用 POSIX 启动脚本（安装时需要 Python 3.11+）：
+
+```sh
+sh scripts/install.sh
+sh scripts/install.sh --channel alpha
+```
+
+安装器注册 Git marketplace、安装并启用插件、配置原生直接调用。已有本地安装会迁移，保留 `terminalhook@terminalhook-local` 和其他用户设置。marketplace 名称保留历史 `-local` 后缀以兼容旧配置，实际来源为 Git。marketplace 注册失败会恢复原来源和跟踪分支。插件安装需要 Codex CLI，Git 安装还需要 Git。Windows 使用 PowerShell 7；Linux/macOS 安装使用 Python 3.11+。安装后的 MCP 二进制运行不需要 Rust、Python 或 Node。
 
 Codex 自身的启动任务刷新已配置的 Git marketplace 及已安装插件缓存。也可显式请求刷新：
 
@@ -33,7 +52,7 @@ codex plugin marketplace upgrade terminalhook-local
 
 更新跟随所选分支，不查询 GitHub 的 latest-release API。项目没有自建后台更新器，也不承诺 App 长期开启时的定时检查间隔。更新后新开 Codex 聊天；原会话进程仍由原 MCP 连接管理，不做热迁移。参见[官方 marketplace 命令](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)。
 
-离线安装或本地开发：从 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 下载 ZIP，解压到固定目录，执行 `pwsh -NoProfile -File .\install.ps1 -Source .`。不带 `-Source` 运行包内安装器则选择 Git 稳定渠道。CI 预览 ZIP 也可从 [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions) 获取。
+离线安装或本地开发：从 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 下载匹配系统/架构的 ZIP，解压到固定目录；Windows 执行 `pwsh -NoProfile -File ./install.ps1 -Source .`，Linux/macOS 执行 `sh ./install.sh --source .`。Unix 应使用 `unzip` 等保留可执行权限的解压工具。不指定本地来源时安装器选择 Git 稳定渠道。CI 预览 ZIP 也可从 [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions) 获取。
 
 从源码构建并安装本地快照：
 
@@ -41,6 +60,8 @@ codex plugin marketplace upgrade terminalhook-local
 pwsh -NoProfile -File scripts/package.ps1
 pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 ```
+
+Linux/macOS 使用 `python3 scripts/package.py --channel development` 构建，再执行 `sh scripts/install.sh --source ./dist/package` 安装。原生源码构建需要固定版本的 Rust 工具链及 Python 3.11+。Linux 二进制使用 glibc（基于 Ubuntu 24.04 构建）；Alpine/musl 和 Windows ARM64 暂不作为发布目标。macOS 产物未签名，也未公证。
 
 `package.ps1` 生成 ZIP 及 `dist/SHA256SUMS.txt`。本地安装需要保留目录，文件变化后重新执行安装器，不下载远端更新。两种模式均使用标准 `codex plugin marketplace add`、`codex plugin add` 命令及 Codex 配置编辑接口，保留已有设置，并将 `mcp__terminalhook` 加入 `features.code_mode.direct_only_tool_namespaces`。此管理过程不发起模型请求。
 
@@ -102,7 +123,7 @@ direct_only_tool_namespaces = ["mcp__terminalhook"]
 
 `program` 不经过隐式 shell；管道、重定向、`.cmd` 需要显式调用 `pwsh`/`cmd.exe`。`cwd` 必须绝对。`env` 添加或覆盖继承的服务环境。默认保留 stdin，支持后续输入；需要 EOF 时用 `write_input` 的 `eof: true`。
 
-默认 `mode: "pipe"` 分别读取 stdout/stderr，`streams` 可选择其一或全部。交互程序可选 `mode: "pty"`，使用 Windows ConPTY，`rows` 默认 24、`cols` 默认 120，范围均为 1–500。PTY 仅提供合并的 `terminal` 输出流，`streams` 应省略或设为 `["terminal"]`；输入可能被终端回显。
+默认 `mode: "pipe"` 分别读取 stdout/stderr，`streams` 可选择其一或全部。交互程序可选 `mode: "pty"`，使用 Windows ConPTY 或 Unix PTY，`rows` 默认 24、`cols` 默认 120，范围均为 1–500。PTY 仅提供合并的 `terminal` 输出流，`streams` 应省略或设为 `["terminal"]`；输入可能被终端回显。Linux/macOS 使用 `/home/me/project` 或 `/Users/me/project` 等本机绝对工作目录；需要 shell 语法时显式调用 `sh -c` 或 `bash -lc`。
 
 PowerShell 中的中文输入、输出和原生程序管道需要统一为 UTF-8。插件技能附带 `scripts/Initialize-Utf8.ps1`，在目标 PowerShell 会话中点导入后再执行命令或脚本（路径使用实际安装位置）：
 
@@ -206,7 +227,7 @@ Write-Output ('ACK:' + $line)
 
 默认日志在连接专属临时目录，正常断连时删除，淘汰的旧会话临时日志也会删除。需要会话外保留时，在 `run_until` 设置绝对 `log_dir`，服务在其中创建独立进程目录；持久日志不会自动删除。异常硬杀可能留下临时日志，可按操作系统临时文件管理方式清理。
 
-每连接最多 8 个活跃进程、64 个会话。输出使用有界队列，历史最多 1 MiB/进程，每流仅返回 4096 字节输出尾部。匹配后保留的命令仍持续排空输出。源码含 Unix PTY/进程组实现，当前只验证 Windows x64，不把未经运行的 Unix 分支作为发布保证。
+每连接最多 8 个活跃进程、64 个会话。输出使用有界队列，历史最多 1 MiB/进程，每流仅返回 4096 字节输出尾部。匹配后保留的命令仍持续排空输出。Unix 清理会向所管理的进程组发送信号；主动创建其他会话/进程组的后代可能逃离该组。服务被硬杀时的 Job 自动清理属于 Windows 特有保证。
 
 插件仅观察其启动的命令，不能接管 Codex 内置终端。原生终端会话 ID 不是插件可订阅的输出句柄。进程、游标和临时日志仅在当前 MCP 连接有效；不承诺跨连接持久化，也不会自动拦截所有内置 shell 调用。技能会指导 Codex 在等待输出条件时使用这些工具。
 

@@ -11,11 +11,13 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import tomllib
-import zipfile
+
+from distribution import archive_name, binary_name, extract_package, host_platform, marketplace_branch
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = "terminalhook@terminalhook-local"
@@ -27,7 +29,11 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    archive = ROOT / "dist/terminalhook-windows-x64.zip"
+    target = host_platform()
+    native_binary = "plugins/terminalhook/bin/" + binary_name(target)
+    stable_branch = marketplace_branch("production", target)
+    beta_branch = marketplace_branch("beta", target)
+    archive = ROOT / "dist" / archive_name(target)
     artifacts = ROOT / "artifacts"
     artifacts.mkdir(exist_ok=True)
     codex = shutil.which("codex")
@@ -35,8 +41,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="terminalhook git marketplace ", dir=artifacts) as directory:
         task_root = Path(directory)
         package = task_root / "release package"
-        with zipfile.ZipFile(archive) as frozen:
-            frozen.extractall(package)
+        extract_package(archive, package)
         info = json.loads((package / "build-info.json").read_text(encoding="utf-8"))
         environment = os.environ.copy()
         environment.update(CODEX_HOME=str(task_root / "codex home"), PYTHONUTF8="1")
@@ -59,7 +64,12 @@ def main():
                             "-c", "user.email=test@example.invalid", *args], cwd).stdout.strip()
 
         def install(*args, check=True):
-            return command(["pwsh", "-NoProfile", "-File", str(package / "install.ps1"), *args], check=check)
+            if os.name == "nt":
+                launch = ["pwsh", "-NoProfile", "-File", str(package / "install.ps1")]
+            else:
+                launch = ["sh", str(package / "install.sh")]
+                args = tuple({"-Source": "--source", "-GitSource": "--git-source", "-Channel": "--channel"}.get(arg, arg) for arg in args)
+            return command([*launch, *args], check=check)
 
         def snapshot():
             return tomllib.loads(config.read_text(encoding="utf-8"))
@@ -68,7 +78,7 @@ def main():
             servers = cli("mcp", "list")
             server = next(s for s in servers if "terminalhook" in s["name"])
             assert server["enabled"] and server["tool_timeout_sec"] == 660
-            return Path(server["transport"]["cwd"]) / "bin/terminalhook.exe"
+            return Path(server["transport"]["cwd"]) / "bin" / binary_name(target)
 
         def startup_update():
             # Wait locally for the automatic task's actual cache write. The host
@@ -102,9 +112,9 @@ def main():
                         process.stdin.write('{"method":"initialized"}\n')
                         process.stdin.flush()
                         break
-                target = config.parent / "plugins/cache/terminalhook-local/terminalhook/0.0.1/bin/terminalhook.exe"
+                target_path = config.parent / "plugins/cache/terminalhook-local/terminalhook/0.0.1/bin" / binary_name(target)
                 while time.monotonic() < deadline:
-                    if target.is_file() and target.read_bytes() == b"Startup update sentinel; never executed":
+                    if target_path.is_file() and target_path.read_bytes() == b"Startup update sentinel; never executed":
                         return
                     assert process.poll() is None, "Codex exited before automatic marketplace update"
                     time.sleep(0.05)
@@ -128,16 +138,16 @@ def main():
         work = task_root / "distribution"
         shutil.copytree(package, work)
         git("init", "--bare", str(remote))
-        git("init", "-b", "marketplace", cwd=work)
+        git("init", "-b", stable_branch, cwd=work)
         manifest_path = work / "plugins/terminalhook/.codex-plugin/plugin.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["version"] = "0.0.0"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        (work / "plugins/terminalhook/bin/terminalhook.exe").write_bytes(b"Old cache sentinel; never executed")
+        (work / native_binary).write_bytes(b"Old cache sentinel; never executed")
         git("add", ".", cwd=work)
         git("commit", "-m", "Old binary distribution", cwd=work)
-        git("push", str(remote), "marketplace", cwd=work)
-        git("symbolic-ref", "HEAD", "refs/heads/marketplace", cwd=remote)
+        git("push", str(remote), stable_branch, cwd=work)
+        git("symbolic-ref", "HEAD", "refs/heads/" + stable_branch, cwd=remote)
         git("update-server-info", cwd=remote)
         handler = functools.partial(QuietHandler, directory=str(web))
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -151,7 +161,7 @@ def main():
             current = snapshot()
             assert current["marketplaces"]["terminalhook-local"]["source_type"] == "git"
             assert current["marketplaces"]["terminalhook-local"]["source"] == source
-            assert current["marketplaces"]["terminalhook-local"]["ref"] == "marketplace"
+            assert current["marketplaces"]["terminalhook-local"]["ref"] == stable_branch
             assert current["plugins"][PLUGIN]["enabled"]
             assert current["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__existing", "mcp__terminalhook"]
             assert cached_binary().read_bytes().startswith(b"Old cache sentinel")
@@ -161,44 +171,54 @@ def main():
             assert snapshot()["marketplaces"] == current["marketplaces"], (current["marketplaces"], snapshot()["marketplaces"], failed.stdout, failed.stderr)
             assert cached_binary().read_bytes().startswith(b"Old cache sentinel")
             # A valid catalog without its EXE must fail before replacing the installed cache.
-            git("checkout", "-b", "marketplace-beta", cwd=work)
-            git("rm", "plugins/terminalhook/bin/terminalhook.exe", cwd=work)
+            git("checkout", "-b", beta_branch, cwd=work)
+            git("rm", native_binary, cwd=work)
             git("commit", "-m", "Invalid channel missing its binary", cwd=work)
-            git("push", str(remote), "marketplace-beta", cwd=work)
-            git("checkout", "marketplace", cwd=work)
+            git("push", str(remote), beta_branch, cwd=work)
+            git("checkout", stable_branch, cwd=work)
             git("update-server-info", cwd=remote)
             failed = install("-GitSource", source, "-Channel", "beta", check=False)
-            assert failed.returncode != 0 and "compiled Windows binary" in failed.stderr, failed.stdout + failed.stderr
+            assert failed.returncode != 0 and ("compiled Windows binary" in failed.stderr or "compiled native binary" in failed.stderr), failed.stdout + failed.stderr
             assert snapshot()["marketplaces"] == current["marketplaces"]
             assert cached_binary().read_bytes().startswith(b"Old cache sentinel")
             # Prove the automatic startup path, separately from the explicit command.
             manifest["version"] = "0.0.1"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-            (work / "plugins/terminalhook/bin/terminalhook.exe").write_bytes(b"Startup update sentinel; never executed")
+            (work / native_binary).write_bytes(b"Startup update sentinel; never executed")
             git("add", ".", cwd=work)
             git("commit", "-m", "Automatic startup update fixture", cwd=work)
-            git("push", str(remote), "marketplace", cwd=work)
+            git("push", str(remote), stable_branch, cwd=work)
             git("update-server-info", cwd=remote)
             startup_update()
             assert cached_binary().read_bytes().startswith(b"Startup update sentinel"), "Automatic startup did not refresh the binary"
             # Advance the remote with the exact packaged EXE and manifest.
-            for name in ("plugins/terminalhook/bin/terminalhook.exe", "plugins/terminalhook/.codex-plugin/plugin.json"):
+            for name in (native_binary, "plugins/terminalhook/.codex-plugin/plugin.json"):
                 shutil.copyfile(package / name, work / name)
             git("add", ".", cwd=work)
             git("commit", "-m", "Verified binary distribution", cwd=work)
-            git("push", str(remote), "marketplace", cwd=work)
+            git("push", str(remote), stable_branch, cwd=work)
             git("update-server-info", cwd=remote)
             # Only the official command performs this update; no installer or custom downloader.
             result = cli("plugin", "marketplace", "upgrade", "terminalhook-local")
             assert result["selectedMarketplaces"] == ["terminalhook-local"] and not result["errors"], result
             binary = cached_binary()
-            expected = package / "plugins/terminalhook/bin/terminalhook.exe"
+            expected = package / native_binary
             assert hashlib.sha256(binary.read_bytes()).digest() == hashlib.sha256(expected.read_bytes()).digest()
             assert command([str(binary), "--version"]).stdout.strip() == "terminalhook " + info["version"]
+            # Exercise the actual MCP command resolved from the installed plugin cache.
+            sys.path.insert(0, str(ROOT / "tests"))
+            from test_mcp import Client
+            transport = next(s for s in cli("mcp", "list") if "terminalhook" in s["name"])["transport"]
+            client = Client([transport["command"], *transport.get("args", [])], cwd=transport["cwd"])
+            try:
+                client.run("print('READY')")
+                assert client.result()["status"] == "matched", "Installed MCP launch route failed"
+            finally:
+                client.close()
             assert snapshot()["features"] == current["features"]
             install("-GitSource", source)
             assert snapshot()["marketplaces"] == current["marketplaces"]
-            summary = {"passed": True, "version": info["version"], "local_to_git_migration": True,
+            summary = {"passed": True, "platform": target, "version": info["version"], "installed_mcp_launch": True, "local_to_git_migration": True,
                        "failed_channel_restores_git_ref": True, "official_startup_updates_binary": True,
                        "missing_binary_restores_git_ref": True,
                        "official_upgrade_updates_binary": True,

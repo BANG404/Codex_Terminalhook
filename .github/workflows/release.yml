@@ -9,7 +9,7 @@ on:
         options: [alpha, beta, rc, production]
         required: true
       publish:
-        description: Publish a GitHub Release and Git marketplace after all checks (false validates only)
+        description: Publish all verified platforms and advance their Git marketplaces
         type: boolean
         default: false
 
@@ -25,15 +25,15 @@ concurrency:
 jobs:
   request:
     name: Validate release request
-    runs-on: windows-2025
+    runs-on: ubuntu-24.04
     steps:
       - name: Enforce the selected channel and source branch
-        shell: pwsh
         env:
           CHANNEL: ${{ inputs.channel }}
         run: |
-          $sourceBranch = if ($env:CHANNEL -eq 'production') { 'main' } else { $env:CHANNEL }
-          if ($env:GITHUB_REF -ne "refs/heads/$sourceBranch") { throw 'Channel does not match the workflow branch' }
+          source_branch="$CHANNEL"
+          if [ "$CHANNEL" = production ]; then source_branch=main; fi
+          test "$GITHUB_REF" = "refs/heads/$source_branch"
   verify:
     needs: request
     uses: ./.github/workflows/ci.yml
@@ -41,11 +41,11 @@ jobs:
       build_package: true
       long_wait: true
   publish:
-    name: Publish verified distribution
+    name: Publish verified distributions
     if: inputs.publish && github.repository == 'BANG404/Codex_Terminalhook'
     needs: verify
-    runs-on: windows-2025
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: ${{ inputs.channel }}
     permissions:
       contents: write
@@ -59,14 +59,14 @@ jobs:
           python-version: '3.13'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: terminalhook-windows-x64
+          name: release-distributions
           path: dist
-      - name: Publish immutable versioned assets
+      - name: Publish the complete immutable platform set
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
         run: python scripts/publish_release.py
-      - name: Advance the binary Git marketplace channel
+      - name: Advance each platform's binary Git marketplace
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
