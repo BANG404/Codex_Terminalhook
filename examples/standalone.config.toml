@@ -1,5 +1,6 @@
 # Standalone alternative to the plugin. Update the command to your absolute build path.
 # Do not enable both standalone and plugin transports in the same session.
+# Linux/macOS: replace command below with '/absolute/path/target/release/terminalhook'.
 [mcp_servers.terminalhook]
 command = 'D:\Projects\Codex_Terminalhook\target\release\terminalhook.exe'
 startup_timeout_sec = 10

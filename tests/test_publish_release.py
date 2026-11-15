@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from distribution_fixtures import write_release
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location("publish_release", SCRIPTS / "publish_release.py")
@@ -21,13 +23,8 @@ class PublishReleaseTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         (self.root / "dist").mkdir()
         self.info = {"version": "0.3.1-alpha.1.gaaaaaaaaaaaa", "channel": "alpha", "revision": "a" * 40, "dirty": False}
-        self.files = {"terminalhook-windows-x64.zip": b"verified CI artifact"}
-        self.checksum = publisher.hashlib.sha256(self.files["terminalhook-windows-x64.zip"]).hexdigest()
-        self.files["SHA256SUMS.txt"] = (self.checksum + "  terminalhook-windows-x64.zip\n").encode()
-        self.files["build-info.json"] = json.dumps(self.info).encode()
-        for name, data in self.files.items():
-            (self.root / "dist" / name).write_bytes(data)
-        self.notes = f"TerminalHook {self.info['version']}\n\nChannel: alpha\nSource: {self.info['revision']}\nSHA256: {self.checksum}\nLicense: MIT\n"
+        self.files = write_release(self.root, self.info)
+        self.notes = f"TerminalHook {self.info['version']}\n\nChannel: alpha\nSource: {self.info['revision']}\nLicense: MIT\n\nSHA256:\n" + self.files["SHA256SUMS.txt"].decode()
         self.calls = []
 
     def tearDown(self):
@@ -58,7 +55,7 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertIn("--prerelease", creation)
         edit = next(i for i, args in enumerate(self.calls) if args[:2] == ("release", "edit"))
         uploads = [i for i, args in enumerate(self.calls) if args[:2] == ("release", "upload")]
-        self.assertEqual(len(uploads), 3)
+        self.assertEqual(len(uploads), 7)
         self.assertTrue(all(i < edit for i in uploads))
 
     def test_refuses_changed_existing_asset(self):
@@ -82,5 +79,11 @@ class PublishReleaseTests(unittest.TestCase):
         self.info["dirty"] = True
         (self.root / "dist/build-info.json").write_text(json.dumps(self.info))
         with self.assertRaises(AssertionError), patch.object(publisher, "gh") as gh:
+            self.run_publisher(gh)
+        gh.assert_not_called()
+
+    def test_missing_platform_blocks_publication_before_any_write(self):
+        (self.root / "dist/terminalhook-macos-arm64.zip").unlink()
+        with self.assertRaises(FileNotFoundError), patch.object(publisher, "gh") as gh:
             self.run_publisher(gh)
         gh.assert_not_called()

@@ -27,8 +27,8 @@ def ps_literal(value):
 
 
 class Client:
-    def __init__(self):
-        self.proc = subprocess.Popen([str(EXE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    def __init__(self, command=None, cwd=None):
+        self.proc = subprocess.Popen(command or [str(EXE)], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, creationflags=0x08000000 if os.name == "nt" else 0)
         self.messages = queue.Queue()
         self.transcript = []
@@ -481,7 +481,9 @@ class McpTests(unittest.TestCase):
     def test_cancel_cleans_pending_process_tree(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "pids"
-            code = f"import os,pathlib,subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)']); pathlib.Path({str(path)!r}).write_text(str(os.getpid())+','+str(p.pid)); time.sleep(120)"
+            # Publish readiness atomically; file creation alone can precede the PID write.
+            staging = path.with_suffix(".tmp")
+            code = f"import os,pathlib,subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)']); pathlib.Path({str(staging)!r}).write_text(str(os.getpid())+','+str(p.pid)); pathlib.Path({str(staging)!r}).replace({str(path)!r}); time.sleep(120)"
             self.client.run(code)
             # Test fixture readiness only; the MCP client does not poll tools.
             deadline = time.monotonic() + 5
@@ -509,6 +511,31 @@ class McpTests(unittest.TestCase):
         self.assertIn("65536", result["message"])
         self.assertLessEqual(len(result["output_tail"]["stdout"].encode()), 4096)
         self.assertFalse(is_alive(result["os_pid"]))
+
+    @unittest.skipUnless(os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "set TERMINALHOOK_LONG_WAIT=1")
+    def test_utf8_interactive_long_wait(self):
+        code = ("import sys,time;print('READY');line=input();print('ACK:'+line);"
+                "[(time.sleep(10),print('进度:'+str(i),flush=True),print('阶段:'+str(i),file=sys.stderr,flush=True)) for i in range(9)];"
+                "print('完成:'+line)")
+        self.client.run(code, on_match="keep_running", env={"PYTHONIOENCODING": "utf-8"})
+        ready = self.client.result()
+        self.assertEqual(ready["status"], "matched", ready)
+        ack = self.call("write_input", {"process_id": ready["process_id"], "data": "中文长任务🌏\n", "eof": True,
+                        "wait": {"until": [{"name": "ack", "pattern": "ACK:中文长任务🌏"}], "timeout_ms": 5000}})
+        self.assertEqual(ack["status"], "matched", ack)
+        started = time.monotonic()
+        self.client.send("tools/call", {"name": "wait_output", "arguments": {
+            "process_id": ready["process_id"], "cursor": ack["cursor"], "streams": ["stdout"],
+            "until": [{"name": "done", "pattern": "完成:中文长任务🌏"}], "timeout_ms": 110000}}, 4)
+        done = self.client.result(timeout=115)
+        self.assertEqual(done["status"], "matched", done)
+        self.assertGreaterEqual(time.monotonic() - started, 89)
+        replies = [t for t in self.client.transcript if t["direction"] == "received" and t["message"].get("id") == 4]
+        self.assertEqual(len(replies), 1)
+        exited = self.call("wait_output", {"process_id": ready["process_id"], "cursor": done["cursor"],
+                           "until": [{"name": "never", "pattern": "NEVER"}], "timeout_ms": 5000}, 5)
+        self.assertEqual(exited["status"], "exited_unmatched", exited)
+        self.assertEqual(exited["exit_code"], 0)
 
     @unittest.skipUnless(os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "set TERMINALHOOK_LONG_WAIT=1")
     def test_wait_over_default_client_timeout(self):
