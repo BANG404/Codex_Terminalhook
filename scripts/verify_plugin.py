@@ -48,7 +48,7 @@ def main():
             package.extractall(previous_source)
         cli("plugin", "marketplace", "add", str(previous_source), "--json")
         cli("plugin", "add", "terminalhook@terminalhook-local", "--json")
-        install = subprocess.run(["pwsh", "-NoProfile", "-File", str(extracted / "install.ps1")], cwd=extracted, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
+        install = subprocess.run(["pwsh", "-NoProfile", "-File", str(extracted / "install.ps1"), "-Source", str(extracted)], cwd=extracted, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
         assert install.returncode == 0, install.stdout + install.stderr
         installed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert installed_config["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__existing", "mcp__terminalhook"]

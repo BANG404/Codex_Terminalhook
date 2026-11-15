@@ -26,6 +26,8 @@ def main():
         plugin = unpacked / "plugins/terminalhook"
         info = json.loads((unpacked / "build-info.json").read_text(encoding="utf-8"))
         assert (unpacked / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
+        for name in ("README.md", "README.zh-CN.md"):
+            assert (unpacked / name).read_bytes() == (ROOT / "examples/package" / name).read_bytes()
         manifest = json.loads((plugin / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         assert manifest["version"] == info["version"]
         assert "hooks" not in manifest

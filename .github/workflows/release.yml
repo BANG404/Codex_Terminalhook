@@ -9,7 +9,7 @@ on:
         options: [alpha, beta, rc, production]
         required: true
       publish:
-        description: Publish a GitHub Release after all checks (false validates only)
+        description: Publish a GitHub Release and Git marketplace after all checks (false validates only)
         type: boolean
         default: false
 
@@ -66,3 +66,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
         run: python scripts/publish_release.py
+      - name: Advance the binary Git marketplace channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: python scripts/publish_marketplace.py

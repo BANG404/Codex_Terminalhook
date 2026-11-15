@@ -1,12 +1,16 @@
 # TerminalHook for Windows x64
 
-解压本目录到固定位置（路径可包含空格），安装：
+[English](README.md) | 简体中文
+
+解压本目录（路径可包含空格），安装 Git 稳定渠道：
 
 ```powershell
 pwsh -NoProfile -File .\install.ps1
 ```
 
-需要已安装 Codex CLI。运行期不需要 Rust、Python 或 Node。安装会注册当前目录为本地 marketplace 并启用 TerminalHook；请保留此目录，后续可重新运行安装脚本更新。新开 Codex 会话加载工具。
+需要已安装 Codex CLI 和 Git。安装器注册 `BANG404/Codex_Terminalhook` 的 `marketplace` 分支，其中包含编译好的 Windows x64 二进制。Codex 启动时的 marketplace 刷新负责更新安装缓存，也可执行 `codex plugin marketplace upgrade terminalhook-local` 显式刷新。使用 `-Channel alpha`、`-Channel beta` 或 `-Channel rc` 跟踪预发布渠道；各渠道须先执行首次发布版 Release 工作流。marketplace 保留历史名称，已有本地安装迁移时无需改变插件 ID。注册失败会恢复原来源和跟踪分支。更新后新开 Codex 会话，活跃进程不做迁移。
+
+运行期不需要 Rust、Python 或 Node。若需离线安装当前解压包，执行 `pwsh -NoProfile -File .\install.ps1 -Source .`，并保留该目录。此模式不需要 Git，不下载后续更新；替换本地文件后重新执行安装器即可更新。不带 `-Source` 时始终安装 Git 分发版。
 
 0.4.0 默认使用原生直接调用，不包含 Stop 或其他生命周期 Hook，无需信任 Hook。安装器通过 Codex 配置接口将 `mcp__terminalhook` 加入用户的 `[features.code_mode].direct_only_tool_namespaces`，保留其他命名空间和设置；该管理过程不启动模型。新聊天直接调用 `run_until` 并等待结果，长等待不经 `functions.exec` 包装，命令运行及等待不使用 Codex CLI。通过桌面 UI 手动安装而未运行此脚本时，也需配置该命名空间；项目配置可能覆盖用户设置。宿主必须支持该配置。
 
