@@ -9,7 +9,6 @@ use rmcp::{
 use serde_json::{Value, json};
 
 use crate::{
-    jobs::{AuditRequest, HookRequest, Jobs, PrepareRequest, SubmitRequest},
     process::Manager,
     spec::{ProcessRequest, RunRequest, WaitRequest, WriteRequest},
 };
@@ -17,51 +16,15 @@ use crate::{
 #[derive(Clone)]
 pub struct TerminalHook {
     manager: Manager,
-    jobs: Jobs,
 }
 
 impl TerminalHook {
     pub fn new(manager: Manager) -> Self {
-        Self {
-            jobs: Jobs::new(manager.clone()),
-            manager,
-        }
+        Self { manager }
     }
 
     fn tools() -> Vec<Tool> {
         vec![
-            Tool::new(
-                "submit_task",
-                "Submit a background command and return immediately. Requires the plugin PreToolUse hook to inject session_id/turn_id; omit these fields from model calls. After submission, end the turn. The synchronous Stop hook waits locally and continues with results; do not poll or call wait tools.",
-                schemars::schema_for!(SubmitRequest)
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-            Tool::new(
-                "prepare_task",
-                "Host-only PreToolUse hook: bind submit_task input to its actual chat and turn. Do not call from the model.",
-                schemars::schema_for!(PrepareRequest)
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-            Tool::new(
-                "await_tasks",
-                "Host-only synchronous Stop hook: wait for this chat's submitted tasks using local events and return one continuation. Do not call from the model.",
-                schemars::schema_for!(HookRequest)
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-            Tool::new(
-                "audit_event",
-                "Host-only model lifecycle hook. Record model-request boundaries for verifying that Stop waiting does not wake the model. Do not call from the model.",
-                schemars::schema_for!(AuditRequest)
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
             Tool::new(
                 "run_until",
                 "Start a command and wait locally for an output regex, exit, or timeout without polling. Default: terminate on match/timeout. Use on_match=keep_running to retain a service, then wait_output/write_input with returned process_id and cursor. Pipe keeps stdout/stderr separate; mode=pty is a real terminal with merged terminal output. Supports line or bounded multiline window matching and rotating raw logs.",
@@ -124,22 +87,6 @@ impl ServerHandler for TerminalHook {
     ) -> Result<CallToolResponse, ErrorData> {
         let args = Value::Object(request.arguments.unwrap_or_default());
         let result = match request.name.as_ref() {
-            "submit_task" => match serde_json::from_value::<SubmitRequest>(args) {
-                Ok(input) => self.jobs.submit(input),
-                Err(e) => Err(format!("Invalid arguments: {e}")),
-            },
-            "prepare_task" => match serde_json::from_value::<PrepareRequest>(args) {
-                Ok(input) => self.jobs.prepare(input),
-                Err(e) => Err(format!("Invalid arguments: {e}")),
-            },
-            "await_tasks" => match serde_json::from_value::<HookRequest>(args) {
-                Ok(input) => self.jobs.await_tasks(input, context.ct).await,
-                Err(e) => Err(format!("Invalid arguments: {e}")),
-            },
-            "audit_event" => match serde_json::from_value::<AuditRequest>(args) {
-                Ok(input) => self.jobs.audit(input),
-                Err(e) => Err(format!("Invalid arguments: {e}")),
-            },
             "run_until" => match serde_json::from_value::<RunRequest>(args) {
                 Ok(input) => self.manager.run(input, context.ct).await,
                 Err(e) => Err(format!("Invalid arguments: {e}")),
