@@ -8,7 +8,9 @@ pwsh -NoProfile -File .\install.ps1
 
 需要已安装 Codex CLI。运行期不需要 Rust、Python 或 Node。安装会注册当前目录为本地 marketplace 并启用 TerminalHook；请保留此目录，后续可重新运行安装脚本更新。新开 Codex 会话加载工具。
 
-0.3.0 新增桌面 Agent 的同步 Stop Hook 流程：`submit_task` 提交长任务后立即返回，Agent 结束本轮生成，宿主的 MCP Hook 在本地等待完成后再让 Agent 续跑。此运行流程不需要 Codex CLI。安装更新后在桌面 App 的 Review hooks / Settings > Hooks 审阅并信任新增 Hook。`prepare_task` / `await_tasks` / `audit_event` 由宿主调用，不应由模型手动调用。模型请求记录和 Stop 等待记录的文件路径由 `submit_task.audit_path` 返回。
+0.4.0 默认使用原生直接调用，不包含 Stop 或其他生命周期 Hook，无需信任 Hook。安装器通过 Codex 配置接口将 `mcp__terminalhook` 加入用户的 `[features.code_mode].direct_only_tool_namespaces`，保留其他命名空间和设置；该管理过程不启动模型。新聊天直接调用 `run_until` 并等待结果，长等待不经 `functions.exec` 包装，命令运行及等待不使用 Codex CLI。通过桌面 UI 手动安装而未运行此脚本时，也需配置该命名空间；项目配置可能覆盖用户设置。宿主必须支持该配置。
+
+历史同步 Stop Hook 版本保存在 https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook 。新版不提供 `submit_task`、`prepare_task`、`await_tasks` 或 `audit_event`。
 
 保留原有四个工具：`run_until` 启动命令并等待正则；`wait_output` 从游标继续等待；`write_input` 发送输入并可同时等待；`stop_process` 清理进程树。等待在本地进行，不返回需要模型轮询的 `pending`。
 
