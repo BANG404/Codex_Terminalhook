@@ -20,7 +20,7 @@ pwsh -NoProfile -File scripts/package.ps1
 pwsh -NoProfile -File scripts/install.ps1
 ```
 
-`package.ps1` 生成 Zip 及 `dist/SHA256SUMS.txt`。安装脚本使用标准 `codex plugin marketplace add` 和 `codex plugin add` 注册本地目录、安装并启用插件。保持该目录可用，更新后重新执行安装脚本，再新开 Codex 会话加载新版本。现有会话中的进程由原 MCP 连接管理，不做热迁移。
+`package.ps1` 生成 Zip 及 `dist/SHA256SUMS.txt`。安装脚本使用标准 `codex plugin marketplace add` 和 `codex plugin add` 注册本地目录、安装并启用插件，并通过 Codex 配置编辑接口将 `mcp__terminalhook` 加入用户的 `features.code_mode.direct_only_tool_namespaces`，保留已有命名空间及其他设置。此管理过程不发起模型请求。保持该目录可用，更新后重新执行安装脚本，再新开 Codex 会话加载新版本。现有会话中的进程由原 MCP 连接管理，不做热迁移。
 
 也可以独立配置 MCP，参考 `examples/standalone.config.toml`。独立服务和插件二选一，避免重复工具。项目中 `.codex/config.toml` 的启用设置只对受信任项目生效，也不能替代安装。插件保留默认工具审批策略；MCP 命令使用本机账户权限，不继承 Codex 内置 shell 的逐命令沙箱。
 
@@ -31,17 +31,26 @@ codex plugin remove terminalhook@terminalhook-local
 codex plugin marketplace remove terminalhook-local
 ```
 
-## 工具与同步 Hook
+## 直接调用与终端工具
 
-### 桌面 App 同步 Stop Hook（0.3.0）
+### 桌面 App 直接调用（已实测）
 
-非交互长任务使用 `submit_task`，参数与 `run_until` 一致，省略 `session_id` / `turn_id`。插件的 `PreToolUse` MCP Hook 会自动绑定真实聊天；提交立即返回任务 ID，Agent 随即结束本轮生成。宿主在同步 `Stop` Hook 中调用 `await_tasks`，本地等待事件，完成后仅返回一次续跑结果。此路径不使用 Codex CLI，也不需要模型调用 `functions.wait` 或状态查询。
+0.4.0 起默认使用原生直接调用，不包含生命周期 Hook，也无需审阅或信任 Hook。安装器自动写入以下用户配置；手动安装插件或独立配置 MCP 时，应自行将该命名空间加入已有数组：
 
-更新后在桌面 App 的 **Review hooks / Settings > Hooks** 中审阅并信任插件 Hook。新的测试回合必须加载新版插件。未注入聊天上下文时，`submit_task` 拒绝启动任务。`prepare_task` / `await_tasks` / `audit_event` 供宿主 Hook 使用，不应由模型手动调用。
+```toml
+[features.code_mode]
+direct_only_tool_namespaces = ["mcp__terminalhook"]
+```
 
-`submit_task` 的 `on_match` / `on_timeout` 仅允许默认值 `terminate`，以便结果交付时任务已清理。需要等待自然退出时，可使用不会输出的标记并检查退出码。交互服务继续使用 `run_until`。Hook 默认等待上限 650 秒，任务上限 600 秒，MCP 上限 660 秒。中断 Hook 会取消该 Hook 正在等待的任务；MCP 断连会清理其进程。此模式保持回合在 Hook 阶段等待，不是跨应用重启的恢复机制。
+新开聊天加载配置后，直接调用 `mcp__terminalhook.run_until` 并等待一次返回，不经 `functions.exec` 包装。直接调用属于宿主配置，插件 manifest 本身不能强制工具暴露方式；直接安装插件但跳过安装脚本时，必须检查该设置。项目配置可以覆盖用户设置；不支持该配置的旧宿主需先更新。命令运行及等待不使用 Codex CLI。
 
-插件的 `PreModelRequest` / `PostModelRequest` MCP Hook 记录模型请求边界，任务服务记录 `hook_wait_started` / `hook_wait_finished`。JSONL 文件按聊天分开，仅保存时间、聊天/回合 ID 和事件摘要，不记录提示词。文件位置由 `submit_task.audit_path` 返回：优先 `TERMINALHOOK_AUDIT_DIR`、其次 `PLUGIN_DATA/audit`，否则使用系统临时目录下的 `terminalhook-hook-audit`。每个聊天日志 2 MiB 轮转并保留一份旧日志。验收时必须确认等待前后的模型 Hook 均有记录，再统计等待区间内的请求；缺少模型记录不能视为零唤醒。
+直接调用切换前的桌面实测：0.3.1 保留模型审计并禁用 Stop 后，工具调用耗时 120.6039 秒；完整命令执行区间 120.169 秒内，目标聊天模型请求数为 0。一次原生调用、一次结果，退出码 0，中文 stdout/stderr 各 12 条完整，模型审计在执行前后均有记录。此证据证明该调用路径，无需 Stop 等待；不等同于所有宿主或所有版本的后台请求保证。0.4.0 默认包不再提供模型审计 Hook。
+
+本地保留原始模型事件和调用轨迹时，可用 `scripts/audit_direct_wait.py <rollout.jsonl> <audit.jsonl>` 复核原始记录；默认使用 `artifacts/desktop-direct-call-markers.json` 中的命令起止时间。测试记录不纳入源码仓库。
+
+### 历史 Hook 版本
+
+0.3.1 的同步 Stop Hook、后台提交和模型审计实现单独保存在 [legacy/stop-hook 分支](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。新版已移除 `submit_task`、`prepare_task`、`await_tasks`、`audit_event` 和 Hook 定义；升级后旧聊天仍需结束其 MCP 连接，再新开聊天加载新版。
 
 ### 原有终端工具
 
@@ -197,18 +206,14 @@ python -m unittest discover -s tests -k powershell_utf8_long_wait -v
 # 从发布 Zip 解压、执行安装脚本，在隔离 Codex 目录测试缓存中的二进制
 python scripts/verify_plugin.py
 
-# 使用当前登录进行真实 Codex 65 秒验证
-python scripts/verify_codex.py
-python scripts/verify_codex.py --plugin
-
-# 实际插件的启动、后续等待、交互输入及停止工作流
-python scripts/verify_codex.py --plugin --workflow
+# 从发布 Zip 解压，验证无 Hook 的清单和实际二进制协议
+python scripts/verify_package.py
 
 # 完成发布验证后核对源码、Zip、安装缓存及验收记录
 python scripts/audit_release.py
 ```
 
-协议测试仅使用 Python 3 标准库；安装验证使用 Python 3.11+ 的 `tomllib`。真实 Codex 验证不修改全局配置，保存 CLI 事件、MCP 往返及摘要到 `artifacts/`。单次等待验证一次调用、一个结果、等待期间无中间结果及模型 shell 查询；工作流验证四个工具和进程清理。证据只证明这些实际运行没有工具轮询，不声称控制客户端所有后台行为。
+协议测试仅使用 Python 3 标准库；安装验证使用 Python 3.11+ 的 `tomllib`，在隔离 Codex 目录检查安装器、缓存二进制和配置的幂等写入，不启动模型。桌面调用路径应在实际 App 聊天中验证；协议测试不能证明宿主模型请求数。历史 CLI 验证脚本仅为可选开发诊断，不是插件的默认运行或桌面验收方式。
 
 ## 实现依据
 

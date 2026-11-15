@@ -15,4 +15,6 @@ codex plugin marketplace add $sourceRoot --json
 if ($LASTEXITCODE -ne 0) { throw 'Marketplace registration failed' }
 codex plugin add terminalhook@terminalhook-local --json
 if ($LASTEXITCODE -ne 0) { throw 'Plugin installation failed' }
+$directSetup = Join-Path $PSScriptRoot 'Enable-DirectTools.ps1'
+& $directSetup
 Write-Output 'TerminalHook installed. Open a new Codex chat to load the updated tools.'

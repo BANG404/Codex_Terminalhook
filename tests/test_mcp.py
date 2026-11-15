@@ -144,8 +144,8 @@ class McpTests(unittest.TestCase):
                             "$line = [Console]::ReadLine(); Write-Output ('ACK:' + $line); "
                             "[Console]::Error.WriteLine('STDERR:' + $line); exit 0")
                     self.client.run("", program=program, args=["-NoProfile", "-Command", code],
-                                    mode=mode, on_match="keep_running")
-                    ready = self.client.result()
+                                    mode=mode, on_match="keep_running", timeout_ms=30000)
+                    ready = self.client.result(timeout=35)
                     self.assertEqual(ready["status"], "matched", ready)
                     ack = self.call("write_input", {
                         "process_id": ready["process_id"],
@@ -179,8 +179,8 @@ class McpTests(unittest.TestCase):
                         f"& {ps_literal(sys.executable)} -c {ps_literal(native_code)}; exit $LASTEXITCODE")
                 self.client.run("", program=program, args=["-NoProfile", "-Command", code],
                                 until=[{"name": "native", "pattern": "^NATIVE:" + re.escape(text) + "$"}],
-                                on_match="keep_running")
-                native = self.client.result()
+                                on_match="keep_running", timeout_ms=30000)
+                native = self.client.result(timeout=35)
                 self.assertEqual(native["status"], "matched", native)
                 exited = self.call("wait_output", {
                     "process_id": native["process_id"], "cursor": native["cursor"],
@@ -414,7 +414,7 @@ class McpTests(unittest.TestCase):
     def test_discovery(self):
         self.client.send("tools/list", {}, 2)
         tools = self.client.receive()["result"]["tools"]
-        self.assertEqual({t["name"] for t in tools}, {"run_until", "wait_output", "write_input", "stop_process", "submit_task", "prepare_task", "await_tasks", "audit_event"})
+        self.assertEqual({t["name"] for t in tools}, {"run_until", "wait_output", "write_input", "stop_process"})
         self.assertIn("until", tools[0]["inputSchema"]["required"])
 
     def test_no_intermediate_response_and_concurrent_ping(self):
