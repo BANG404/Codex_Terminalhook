@@ -133,7 +133,7 @@ impl Backend {
                 .collect::<Vec<_>>(),
         );
         let (tx, rx) = mpsc::channel(32);
-        let mut backend = if input.mode == Mode::Pipe {
+        let backend = if input.mode == Mode::Pipe {
             let mut command = tokio::process::Command::new(program);
             command
                 .args(args)
@@ -281,6 +281,8 @@ impl Backend {
                 readers: vec![read],
             }
         };
+        #[cfg(windows)]
+        let mut backend = backend;
         #[cfg(windows)]
         {
             if let Err(e) = gate.release() {

@@ -1,16 +1,26 @@
-# TerminalHook for Windows x64
+# TerminalHook native distribution
 
 English | [简体中文](README.zh-CN.md)
 
-Extract this directory (spaces in the path are supported), then install the Git stable channel:
+Extract the ZIP matching your OS/architecture (paths with spaces are supported). `platform.json` identifies this package. On Windows, install the Git stable channel:
 
 ```powershell
 pwsh -NoProfile -File .\install.ps1
 ```
 
-Codex CLI and Git must already be installed. The installer registers `BANG404/Codex_Terminalhook` at its `marketplace` branch, which contains the compiled Windows x64 binary. Codex's startup marketplace refresh updates the installed cache. For an explicit refresh, run `codex plugin marketplace upgrade terminalhook-local`. Use `-Channel alpha`, `-Channel beta`, or `-Channel rc` to track a preview distribution. Each channel requires its first published Release workflow run. The historical marketplace name is retained so existing local installations migrate without changing the plugin ID. A failed registration restores the old source and tracking branch. Open a new Codex session after an update; active processes are not migrated.
+On Linux/macOS, install with Python 3.11+ and the POSIX launcher:
 
-Runtime does not require Rust, Python, or Node. To install this extracted package offline instead, run `pwsh -NoProfile -File .\install.ps1 -Source .` and keep this directory in place. That mode does not require Git and does not download future updates; replace the local files and rerun the installer to update. Without `-Source`, installation always selects the Git distribution.
+```sh
+sh ./install.sh
+# Preview channel:
+sh ./install.sh --channel alpha
+# Offline/local installation of this package:
+sh ./install.sh --source .
+```
+
+Codex CLI and Git must already be installed for Git installation. Windows uses `marketplace` or `marketplace-alpha/beta/rc`; Linux/macOS append the native platform (`-linux-x64`, `-linux-arm64`, `-macos-x64`, or `-macos-arm64`). Installers select the native ref automatically. Use Windows `-Channel alpha/beta/rc` or Unix `--channel alpha/beta/rc` for previews. Each platform/channel requires its first published Release workflow run. Codex's startup marketplace refresh updates the cache; explicitly refresh with `codex plugin marketplace upgrade terminalhook-local`. The historical marketplace name and plugin ID are retained. Failed registration restores the previous source and tracking branch. Open a new Codex session after updates; active processes are not migrated.
+
+Runtime does not require Rust, Python, or Node. Unix installation alone needs Python 3.11+; Windows installation uses PowerShell 7. Offline Windows installation uses `pwsh -NoProfile -File ./install.ps1 -Source .`. Keep local installation directories in place; local mode needs no Git and does not download future updates. Without `-Source` / `--source`, installers select the Git distribution. Preserve ZIP executable permissions when extracting on Unix (for example with `unzip`). Linux builds use glibc compatible with Ubuntu 24.04; macOS binaries are unsigned and not notarized.
 
 Version 0.4.0 uses native direct calls by default, with no Stop or other lifecycle hooks to trust. Through the Codex configuration interface, the installer adds `mcp__terminalhook` to the user's `[features.code_mode].direct_only_tool_namespaces`, preserving other namespaces and settings. This administration does not start a model. In a new chat, call `run_until` directly and await its result. Long waits do not use a `functions.exec` wrapper; command execution and waiting do not use Codex CLI. If you install manually through the desktop UI without running this script, configure the namespace yourself. Project configuration may override user settings. The host must support this configuration.
 
@@ -22,7 +32,7 @@ Example request to Codex:
 
 > Use TerminalHook to run my development server, wait for the Local URL in its output, then return and keep the server running.
 
-Commands require an explicit absolute working directory. Separate stdout/stderr pipes are the default. Interactive commands can use `mode: "pty"` (ConPTY), which provides a merged `terminal` output stream. Regex matching is line-based by default; use bounded `window` mode for cross-line matching. The maximum wait is 10 minutes, and the MCP timeout is 660 seconds.
+Commands require an explicit native absolute working directory. Separate stdout/stderr pipes are the default. Interactive commands can use `mode: "pty"` (Windows ConPTY or Unix PTYs), which provides a merged `terminal` output stream. Invoke `sh -c` / `bash -lc` explicitly for Unix shell syntax. Regex matching is line-based by default; use bounded `window` mode for cross-line matching. The maximum wait is 10 minutes, and the MCP timeout is 660 seconds.
 
 Commands terminate on match or timeout by default. For services, use `on_match: "keep_running"` and call `stop_process` when finished. An optional absolute `log_dir` retains rotating raw logs. Default temporary logs are deleted when the MCP connection closes.
 

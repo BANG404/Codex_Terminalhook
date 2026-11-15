@@ -8,11 +8,11 @@ CI 会拒绝跳过阶段以及来自 fork 的提升。仓库初始快照以相�
 
 | 来源分支 | 产物版本 | GitHub Release |
 | --- | --- | --- |
-| alpha | `0.4.0-alpha.<commit-count>.g<12-char-sha>` | 预发布 |
-| beta | `0.4.0-beta.<commit-count>.g<12-char-sha>` | 预发布 |
-| rc | `0.4.0-rc.<commit-count>.g<12-char-sha>` | 预发布 |
-| main | `0.4.0` | 稳定版 |
-| 功能分支 / PR | `0.4.0-development.<commit-count>.g<12-char-sha>` | 不可发布 |
+| alpha | `0.5.0-alpha.<commit-count>.g<12-char-sha>` | 预发布 |
+| beta | `0.5.0-beta.<commit-count>.g<12-char-sha>` | 预发布 |
+| rc | `0.5.0-rc.<commit-count>.g<12-char-sha>` | 预发布 |
+| main | `0.5.0` | 稳定版 |
+| 功能分支 / PR | `0.5.0-development.<commit-count>.g<12-char-sha>` | 不可发布 |
 
 `Cargo.toml`、`Cargo.lock` 和源码插件清单共享稳定版本基线。
 准备下一个稳定版本时须同步修改。渠道后缀在打包时生成，不修改受版本控制的文件。
@@ -60,21 +60,33 @@ python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 
 ## CI
 
-Alpha PR 在 Windows runner 上执行格式检查、Clippy、Rust 单元测试、
-Python 协议与发布策略测试，并通过独立任务构建分发包。
-包内二进制会在解压后的目录中测试，包括路径含空格的情况。
-产物包含 ZIP、SHA256SUMS.txt 和源码构建标识。
-运行期产物、本地聊天轨迹、凭据和编译后二进制不提交到源码分支。
-编译后二进制仅由 Release 工作流提交到独立 marketplace 分发分支。
-Actions 依赖固定到提交 SHA。
+Alpha PR 在五个原生目标执行格式检查、Clippy、Rust 单元测试、Python 协议与发布策略测试，
+随后执行原生打包和安装验收：
 
-分支必需检查保持为 **Quality checks** 和 **Package verification**。
-变更通过 PR 进行；push 事件不再重复执行 PR 验证。更新 PR 后，过时的 CI 运行会被取消。
-Alpha PR 完整执行一次检查。Beta、rc 和 main 的提升 PR 使用轻量 Linux 任务：
-强制阶段顺序、要求合并树等于来源树、查找与该已测试源码树完全一致的成功 alpha CI 包，
-并保留其运行、产物和校验和标识。证据缺失、过期或不匹配均会阻止提升。
-提升期间不进行 Rust 编译、协议重测或二进制重命名。
-`promotion-validation.json` 链接原始证据。源码树包含工作流和测试文件，因此 CI 变更也必须重新通过 alpha 验证。
+| 目标 | 原生 runner | 二进制 |
+| --- | --- | --- |
+| windows-x64 | windows-2025 | terminalhook.exe |
+| linux-x64 | ubuntu-24.04 | terminalhook |
+| linux-arm64 | ubuntu-24.04-arm | terminalhook |
+| macos-x64 | macos-15-intel | terminalhook |
+| macos-arm64 | macos-15 | terminalhook |
+
+每个二进制均从路径含空格的解压目录运行测试，验证隔离安装、配置保留、Git 迁移和失败恢复、
+启动自动更新、显式升级及缓存中的实际 MCP 启动命令。ZIP 与 Git 树保留可执行权限。
+Linux 使用基于 Ubuntu 24.04 构建的 glibc；Alpine/musl 和 Windows ARM64 不在发布矩阵内。
+macOS 二进制未签名，也未公证。
+
+分支必需检查保持为 **Quality checks** 和 **Package verification**。两者汇总所有原生结果，
+任一任务失败、取消或意外跳过均不能通过。只有完整的五平台归档和安装证据才能生成
+`release-distributions` 及汇总 `package-verification` 报告。变更使用 PR，push 不重复验证，
+PR 更新后取消过时运行。Actions 固定到提交 SHA。
+
+Beta、rc、main 提升 PR 使用轻量 Linux 任务，强制阶段顺序、要求合并树等于来源树，
+并查找验证过完全相同源码树的成功 alpha CI。每个平台的产物、校验和及源码身份必须存在且未过期；
+证据缺失或不匹配都会阻止提升。提升期间不编译 Rust、不重跑协议、不重新标记二进制。
+`promotion-validation.json` 保留原验证证据。工作流和测试属于源码树，修改后必须重新验证 alpha。
+
+源码提交排除编译后二进制、运行日志、本地聊天轨迹和凭据；仅 Release 会向独立 marketplace 分支写入二进制。
 
 ## 提升源码
 
@@ -91,61 +103,73 @@ Alpha PR 完整执行一次检查。Beta、rc 和 main 的提升 PR 使用轻量
 
 ## CD / 手动发布
 
-在 GitHub Actions 中选择 **Release**，选择工作流分支及匹配的渠道（`production` 使用 `main`）。
-保持 **publish** 关闭可执行端到端验证；显式启用后才会发布 GitHub Release 并推进对应 Git marketplace 渠道。
+GitHub Actions 选择 **Release**，指定工作流分支及匹配渠道（`production` 使用 `main`）。
+**publish** 关闭时仅验证，不改变发布版和 marketplace 引用；启用后发布完整原生产物集。
+四个阶段共用同一套五目标矩阵。
 
-工作流检查分支、复用 alpha 源码验证、构建一次最终渠道版本，并检查包内二进制，
-包括显式的 65 秒和 90 秒等待回归测试。发布使用该已验证产物；
-阶段提升不会将 alpha 二进制重新标记为稳定版。
-具备写权限的任务创建带注释的 `v<version>` 标签，并上传分发包、校验和及构建标识。
-非生产渠道作为预发布版本。重跑可补完未完成的草稿，但不能替换已有资源或修改标签指向。
-稳定版还会拒绝将同一版本用于不同的源码提交。
+工作流检查分支、复用完整 alpha 源码验证，为每个目标构建一次最终渠道版本。每个包内二进制均通过
+协议、安装、Git 更新、显式 65 秒等待及 90 秒交互式 UTF-8 回归。Windows 额外执行
+PowerShell UTF-8 长等待回归。阶段提升不会将 alpha 二进制重新标记为稳定版。
 
-不可变 Release 发布后，`scripts/publish_marketplace.py` 下载其 ZIP，核对与已验证本地产物一致，
-将 ZIP 的完整文件集（包括 `terminalhook.exe`）及发布版 `SHA256SUMS.txt` 写入 Git 树。
-此步骤不会重新编译或下载另一份二进制。
+发布前汇总核验全部源码身份、校验和、原生启动配置、二进制格式和可执行权限。
+发布版包含五份 `terminalhook-<platform>.zip`、覆盖五份归档的单个 `SHA256SUMS.txt`，
+以及共享 `build-info.json`。写权限任务创建带注释的 `v<version>` 标签。非生产渠道是预发布版。
+重跑可补完未完成草稿，但不能替换资源、修改标签指向，或将同一稳定版本用于不同源码。
+缺少平台时，在创建标签前阻止写入。
 
-| 发布渠道 | 分发分支 | 安装器选项 |
+不可变 Release 发布后，`scripts/publish_marketplace.py` 下载并核对全部 ZIP 与本地已验证产物一致，
+将每个完整包及校验和清单写入对应 Git 分支，不重新编译或替换二进制。Windows 保留历史引用：
+
+| 渠道 | Windows x64 分支 | Windows 安装选项 |
 | --- | --- | --- |
 | production | `marketplace` | 默认 / `-Channel production` |
 | alpha | `marketplace-alpha` | `-Channel alpha` |
 | beta | `marketplace-beta` | `-Channel beta` |
 | rc | `marketplace-rc` | `-Channel rc` |
 
-首次分发提交没有源码历史父提交；后续提交以当前分发 HEAD 为父提交，不强制更新分支，
-并发写入会被拒绝。内容相同的重跑不写入新提交；同版本内容变化、源码历史回退、
-版本降级和跨渠道更新均会被拒绝。上一版的过时文件不会带入新树。
-分支在首次发布时创建，创建前该渠道不能安装。不要向这些分支提交源码 PR 或手动编辑；
-仓库规则须允许发布令牌创建并快进更新这四个分支。
+Unix 分支在渠道引用后追加 `-linux-x64`、`-linux-arm64`、`-macos-x64` 或 `-macos-arm64`，
+例如 `marketplace-alpha-macos-arm64`。Unix 安装器用 `--channel alpha/beta/rc/production`
+自动选择原生引用。所有平台保留 `terminalhook@terminalhook-local`。`source.path` 指向 Git 快照内部目录，
+注册来源跟踪可移动的 Git 渠道分支。
 
-marketplace 步骤失败时，已发布的不可变 GitHub Release 保留。
-重跑同一 Release 请求可补充分发，但不能替换资源或覆盖更新的 marketplace HEAD。
-**publish** 关闭时，Release 和 Git marketplace 引用均不会变化。
+首次分发提交不含源码历史父提交；后续从当前分发 HEAD 快进，并发写入会被拒绝。
+相同重跑不写新提交，比较包含可执行模式。同版本内容变化、源码历史回退、版本降级和跨渠道变化均被拒绝。
+过时文件不带入新树。分支在首次发布时创建，因此平台/渠道发布前不能安装。
+仓库规则须允许发布令牌创建并推进四个 Windows 渠道分支及十六个 Unix 变体，不向分发分支提交源码 PR。
 
-目录保留历史名称 `terminalhook-local`，以保留插件 ID 和设置。
-`source.path` 指向 **Git 快照内部**的本地目录；marketplace 注册来源本身是 Git URL，
-跟踪可移动的渠道分支，不固定到发布标签或提交。启动刷新与安装缓存更新由 Codex 负责，
-项目不增加更新守护进程或生命周期 Hook。
+marketplace 发布中途失败时保留不可变 Release 和已完成平台引用。重跑同一 Release 请求补齐剩余引用；
+相同平台跳过，不能覆盖更新的 HEAD。
 
-CI 固定使用 Codex CLI 0.167.0 运行 `scripts/verify_git_marketplace.py`。
-回环 HTTP Git 服务验证本地安装迁移、渠道切换失败恢复、app-server 启动自动更新，
-以及官方 marketplace 升级命令替换二进制。验证使用隔离 Codex 目录，不创建模型轮次。
-这不代表所有桌面版本都能热切换活跃 MCP 连接。
+启动刷新及安装缓存更新由 Codex 负责，没有自建更新守护进程或生命周期 Hook。
+CI 固定 Codex CLI 0.167.0，在每个目标上通过回环 Git 服务验证本地迁移、错误引用恢复、app-server
+启动自动更新、官方升级命令和实际缓存 MCP 命令。使用隔离 Codex 目录，不创建模型轮次；
+不能以此证明桌面模型请求数，也不承诺热迁移活跃 MCP 会话。
 
-发布使用 GitHub 工作流令牌，无需个人访问令牌或外部 runner。
-工具直接暴露和无模型请求仍需在实际桌面 App 中验证；协议 CI 无法证明桌面行为。
-默认包没有生命周期 Hook，历史 0.3.1 实现保存在 `legacy/stop-hook`。
+发布使用 GitHub 工作流令牌，不需要 PAT 或外部 runner。工具直接暴露及桌面行为仍须在实际 App 验证。
+默认包不含生命周期 Hook；历史 0.3.1 实现保留在 `legacy/stop-hook`。
 
 ## 本地构建
+
+在目标系统/架构安装 Python 3.11+ 和固定版本 Rust 工具链后执行：
+
+```sh
+python3 scripts/package.py --channel development
+python3 scripts/verify_package.py
+sh scripts/install.sh --source ./dist/package
+```
+
+Windows 保留 PowerShell 包装脚本：
 
 ```powershell
 ./scripts/package.ps1 -Channel development
 python scripts/verify_package.py
+./scripts/install.ps1 -Source ./dist/package
 ```
 
-构建暂存于 `dist/package`，与源码插件目录分离。
-使用 `./scripts/install.ps1 -Source ./dist/package` 安装本地包，并保留该目录。
-不带 `-Source` 时，即使从源码 checkout 或解压 ZIP 执行安装器，也跟踪 Git 稳定渠道。
+构建暂存到 `dist/package`，与源码插件目录分离。本地安装目录需保留。
+不带 `--source` / `-Source` 时，即使从解压包执行安装器，也选择 Git 稳定渠道。
+插件安装需要 Codex CLI，Git 安装还需要 Git。Unix 仅在安装及 Codex 配置编辑阶段需要
+Python 3.11+；安装后的 Rust MCP 二进制不依赖 Rust 工具链、Python 或 Node。
 
 ## 许可证
 

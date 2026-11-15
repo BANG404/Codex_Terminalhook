@@ -5,12 +5,14 @@ from pathlib import Path
 import zipfile
 
 from version import build_info
+from distribution import archive_name, binary_name, host_platform
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    archive = ROOT / "dist/terminalhook-windows-x64.zip"
+    target = host_platform()
+    archive = ROOT / "dist" / archive_name(target)
     info = json.loads((ROOT / "dist/build-info.json").read_text(encoding="utf-8"))
     assert info == build_info(info["channel"]), "Build identity differs from the current source"
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -23,7 +25,7 @@ def main():
         manifest = json.loads(package.read("plugins/terminalhook/.codex-plugin/plugin.json"))
         assert manifest["version"] == info["version"]
         assert package.read("LICENSE") == (ROOT / "LICENSE").read_bytes()
-        assert hashlib.sha256(package.read("plugins/terminalhook/bin/terminalhook.exe")).hexdigest() == evidence["binary_sha256"]
+        assert hashlib.sha256(package.read("plugins/terminalhook/bin/" + binary_name(target))).hexdigest() == evidence["binary_sha256"]
     result = {"passed": True, "build": info, "archive_sha256": checksum,
               "packaged_protocol_verified": True,
               "desktop_verified": evidence.get("desktop_verified", False)}
