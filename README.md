@@ -9,20 +9,40 @@ A local Rust MCP server and Codex plugin. While a command runs, TerminalHook con
 
 ## Installation and upgrades
 
-Download the Windows x64 package from [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases). CI preview packages are available as artifacts of [Actions](https://github.com/BANG404/Codex_Terminalhook/actions) runs. The source repository contains no compiled binaries; a source checkout is not an installable binary plugin package.
+TerminalHook is distributed as a Git marketplace containing the compiled Windows x64 binary, MCP configuration, and runtime skill. The stable channel tracks this repository's `marketplace` branch; preview channels track `marketplace-alpha`, `marketplace-beta`, or `marketplace-rc`. Each channel becomes available after its first published Release workflow run. Source branches contain no compiled binaries and must not be installed as binary marketplaces.
 
 Development follows the `alpha → beta → rc → main` stage branches. Changes go through PRs: `alpha` receives full validation, and later promotions compare source trees and reuse the original verification artifacts, avoiding duplicate push and PR runs. Stage versions include a commit count and source SHA. Publication is triggered manually through the Release workflow. See [Development, CI/CD, and stage releases](docs/releasing.md). The project uses the [MIT license](LICENSE).
 
-For a Windows x64 release package, extract `dist/terminalhook-windows-x64.zip` to a permanent directory and run its root `install.ps1`. The package includes the marketplace, plugin, binary, skill, and installation instructions in English and Simplified Chinese. Runtime requires Windows and Codex CLI; Rust, Python, and Node are not required.
+Development tasks automatically submit an alpha PR and merge it after the actual current-source CI succeeds, using `scripts/deliver.py` and the repository's [task completion rules](AGENTS.md). This does not promote later stages or publish a release. See [automatic alpha delivery](docs/releasing.md#task-completion-and-automatic-alpha-delivery).
 
-To build, install, or update from source:
+From a source checkout, install the Git distribution without building Rust:
+
+```powershell
+pwsh -NoProfile -File scripts/install.ps1
+# Optional: follow a preview channel instead of stable.
+pwsh -NoProfile -File scripts/install.ps1 -Channel beta
+```
+
+The installer registers the Git marketplace, installs and enables the plugin, and configures native direct calls. Existing local installations migrate while retaining `terminalhook@terminalhook-local` and other user settings. The marketplace name retains its historical `-local` suffix for compatibility; the source is Git. A failed marketplace registration restores the previous source and tracking ref. Runtime requires Windows and Codex CLI; installation from Git also requires Git. Rust, Python, and Node are not required.
+
+Codex's own startup tasks refresh configured Git marketplaces and their installed plugin caches. To request a refresh explicitly:
+
+```powershell
+codex plugin marketplace upgrade terminalhook-local
+```
+
+Updates follow the selected branch, not GitHub's latest-release API. There is no custom background updater or guaranteed polling interval while the app stays open. Open a new Codex chat after an update. Processes in existing sessions remain managed by their original MCP connection and are not migrated live. See the [official marketplace commands](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace).
+
+For offline installation or local development, download the ZIP from [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases), extract it to a permanent directory, and run `pwsh -NoProfile -File .\install.ps1 -Source .`. Running its installer without `-Source` selects the Git stable channel. CI preview ZIPs are also available in [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions).
+
+To build and install a local source snapshot:
 
 ```powershell
 pwsh -NoProfile -File scripts/package.ps1
-pwsh -NoProfile -File scripts/install.ps1
+pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 ```
 
-`package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. The installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands to register the local directory, install the plugin, and enable it. Through the Codex configuration editing interface, it also adds `mcp__terminalhook` to the user's `features.code_mode.direct_only_tool_namespaces`, preserving existing namespaces and other settings. This administration does not send model requests. Keep the directory available, rerun the installer after an update, and open a new Codex session to load the new version. Processes in existing sessions remain managed by their original MCP connection; they are not migrated live.
+`package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. Local installations require the directory to stay available and the installer to be rerun after local changes; they do not download remote updates. In both modes, the installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands and Codex's configuration editing interface to preserve existing settings and add `mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces`. This administration does not send model requests.
 
 Alternatively, configure a standalone MCP server using `examples/standalone.config.toml`. Choose either standalone MCP or the plugin to avoid duplicate tools. Enablement in a project's `.codex/config.toml` only applies to trusted projects and does not replace installation. The plugin retains the default tool approval policy. MCP commands use the local account's OS permissions and do not inherit the per-command sandbox of Codex's built-in shell.
 
@@ -190,6 +210,15 @@ Each connection supports at most 8 active processes and 64 sessions. Output uses
 
 The plugin only observes commands it launches and cannot take over Codex's built-in terminal. Native terminal session IDs are not output handles the plugin can subscribe to. Processes, cursors, and temporary logs are valid only within the current MCP connection. They are not guaranteed to persist across connections. The plugin does not automatically intercept every built-in shell call. Its skill guides Codex to use these tools when waiting for output conditions.
 
+## Agent infrastructure
+
+Documentation is maintained in English (the default) and Simplified Chinese;
+agent workflow skills and scripts use English. The repository includes the
+`terminalhook-development` project skill and a helper for installing
+`terminal-wait` into a standalone MCP consumer project. See
+[Agent workflows and project skills](docs/agent-workflows.md) for setup,
+invocation, updates, and verification.
+
 ## Verification
 
 ```powershell
@@ -209,6 +238,10 @@ python -m unittest discover -s tests -k powershell_utf8_long_wait -v
 # Extract the release ZIP, run the installer, and test the cached binary
 # in an isolated Codex directory
 python scripts/verify_plugin.py
+
+# Test local-to-Git migration, startup auto-update, and the official upgrade command
+# with a loopback Git server and an isolated Codex home
+python scripts/verify_git_marketplace.py
 
 # Extract the release ZIP and verify the hook-free manifest and binary protocol
 python scripts/verify_package.py

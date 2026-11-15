@@ -2,13 +2,15 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Extract this directory to a permanent location (spaces in the path are supported), then install:
+Extract this directory (spaces in the path are supported), then install the Git stable channel:
 
 ```powershell
 pwsh -NoProfile -File .\install.ps1
 ```
 
-Codex CLI must already be installed. Runtime does not require Rust, Python, or Node. Installation registers this directory as a local marketplace and enables TerminalHook. Keep the directory in place and rerun the installer to update it. Open a new Codex session to load the tools.
+Codex CLI and Git must already be installed. The installer registers `BANG404/Codex_Terminalhook` at its `marketplace` branch, which contains the compiled Windows x64 binary. Codex's startup marketplace refresh updates the installed cache. For an explicit refresh, run `codex plugin marketplace upgrade terminalhook-local`. Use `-Channel alpha`, `-Channel beta`, or `-Channel rc` to track a preview distribution. Each channel requires its first published Release workflow run. The historical marketplace name is retained so existing local installations migrate without changing the plugin ID. A failed registration restores the old source and tracking branch. Open a new Codex session after an update; active processes are not migrated.
+
+Runtime does not require Rust, Python, or Node. To install this extracted package offline instead, run `pwsh -NoProfile -File .\install.ps1 -Source .` and keep this directory in place. That mode does not require Git and does not download future updates; replace the local files and rerun the installer to update. Without `-Source`, installation always selects the Git distribution.
 
 Version 0.4.0 uses native direct calls by default, with no Stop or other lifecycle hooks to trust. Through the Codex configuration interface, the installer adds `mcp__terminalhook` to the user's `[features.code_mode].direct_only_tool_namespaces`, preserving other namespaces and settings. This administration does not start a model. In a new chat, call `run_until` directly and await its result. Long waits do not use a `functions.exec` wrapper; command execution and waiting do not use Codex CLI. If you install manually through the desktop UI without running this script, configure the namespace yourself. Project configuration may override user settings. The host must support this configuration.
 

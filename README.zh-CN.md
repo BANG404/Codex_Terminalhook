@@ -9,20 +9,40 @@
 
 ## 安装与升级
 
-下载 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 中的 Windows x64 安装包；CI 的预览包位于 [Actions](https://github.com/BANG404/Codex_Terminalhook/actions) 运行的 artifacts 中。源码仓库不包含已编译二进制，不应将源码 checkout 当作可直接安装的二进制插件包。
+TerminalHook 通过 Git marketplace 分发，包含编译好的 Windows x64 二进制、MCP 配置和运行期技能。稳定渠道跟踪本仓库的 `marketplace` 分支；预发布渠道分别跟踪 `marketplace-alpha`、`marketplace-beta` 或 `marketplace-rc`。各渠道在首次执行发布版 Release 工作流后可用。源码分支不包含编译后二进制，不能直接作为二进制 marketplace 安装。
 
 开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。阶段包版本带提交序号和源码 SHA，发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.zh-CN.md)。项目使用 [MIT 许可证](LICENSE)。
 
-Windows x64 发布包：解压 `dist/terminalhook-windows-x64.zip` 到固定目录，执行根目录的 `install.ps1`。包内含 marketplace、插件、二进制、技能和安装说明；运行期只需要 Windows 与 Codex CLI，不需要 Rust、Python 或 Node。
+开发任务使用 `scripts/deliver.py` 及仓库的[任务完成规则](AGENTS.md)，自动提交 alpha PR，并在当前来源的实际 CI 成功后合并。这不会提升后续阶段或发布版本。参见[自动交付到 alpha](docs/releasing.zh-CN.md#任务完成与自动交付到-alpha)。
 
-从源码构建、安装或更新：
+从源码 checkout 安装 Git 分发版，无需构建 Rust：
+
+```powershell
+pwsh -NoProfile -File scripts/install.ps1
+# 可选：改为跟踪预发布渠道。
+pwsh -NoProfile -File scripts/install.ps1 -Channel beta
+```
+
+安装器注册 Git marketplace、安装并启用插件、配置原生直接调用。已有本地安装会迁移，保留 `terminalhook@terminalhook-local` 和其他用户设置。marketplace 名称保留历史 `-local` 后缀以兼容旧配置，实际来源为 Git。marketplace 注册失败会恢复原来源和跟踪分支。运行期需要 Windows 与 Codex CLI；Git 安装还需要 Git，不需要 Rust、Python 或 Node。
+
+Codex 自身的启动任务刷新已配置的 Git marketplace 及已安装插件缓存。也可显式请求刷新：
+
+```powershell
+codex plugin marketplace upgrade terminalhook-local
+```
+
+更新跟随所选分支，不查询 GitHub 的 latest-release API。项目没有自建后台更新器，也不承诺 App 长期开启时的定时检查间隔。更新后新开 Codex 聊天；原会话进程仍由原 MCP 连接管理，不做热迁移。参见[官方 marketplace 命令](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)。
+
+离线安装或本地开发：从 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 下载 ZIP，解压到固定目录，执行 `pwsh -NoProfile -File .\install.ps1 -Source .`。不带 `-Source` 运行包内安装器则选择 Git 稳定渠道。CI 预览 ZIP 也可从 [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions) 获取。
+
+从源码构建并安装本地快照：
 
 ```powershell
 pwsh -NoProfile -File scripts/package.ps1
-pwsh -NoProfile -File scripts/install.ps1
+pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 ```
 
-`package.ps1` 生成 Zip 及 `dist/SHA256SUMS.txt`。安装脚本使用标准 `codex plugin marketplace add` 和 `codex plugin add` 注册本地目录、安装并启用插件，并通过 Codex 配置编辑接口将 `mcp__terminalhook` 加入用户的 `features.code_mode.direct_only_tool_namespaces`，保留已有命名空间及其他设置。此管理过程不发起模型请求。保持该目录可用，更新后重新执行安装脚本，再新开 Codex 会话加载新版本。现有会话中的进程由原 MCP 连接管理，不做热迁移。
+`package.ps1` 生成 ZIP 及 `dist/SHA256SUMS.txt`。本地安装需要保留目录，文件变化后重新执行安装器，不下载远端更新。两种模式均使用标准 `codex plugin marketplace add`、`codex plugin add` 命令及 Codex 配置编辑接口，保留已有设置，并将 `mcp__terminalhook` 加入 `features.code_mode.direct_only_tool_namespaces`。此管理过程不发起模型请求。
 
 也可以独立配置 MCP，参考 `examples/standalone.config.toml`。独立服务和插件二选一，避免重复工具。项目中 `.codex/config.toml` 的启用设置只对受信任项目生效，也不能替代安装。插件保留默认工具审批策略；MCP 命令使用本机账户权限，不继承 Codex 内置 shell 的逐命令沙箱。
 
@@ -190,6 +210,13 @@ Write-Output ('ACK:' + $line)
 
 插件仅观察其启动的命令，不能接管 Codex 内置终端。原生终端会话 ID 不是插件可订阅的输出句柄。进程、游标和临时日志仅在当前 MCP 连接有效；不承诺跨连接持久化，也不会自动拦截所有内置 shell 调用。技能会指导 Codex 在等待输出条件时使用这些工具。
 
+## 代理基础设施
+
+文档维护英文（默认）与简体中文两版；代理工作流技能和脚本使用英文。
+仓库提供 `terminalhook-development` 项目技能，以及将 `terminal-wait` 安装到
+独立 MCP 目标项目的辅助脚本。安装、调用、更新和验证方式见
+[代理工作流与项目技能](docs/agent-workflows.zh-CN.md)。
+
 ## 验证
 
 ```powershell
@@ -207,6 +234,9 @@ python -m unittest discover -s tests -k powershell_utf8_long_wait -v
 
 # 从发布 Zip 解压、执行安装脚本，在隔离 Codex 目录测试缓存中的二进制
 python scripts/verify_plugin.py
+
+# 使用回环 Git 服务和隔离 Codex 目录验证本地迁移、启动自动更新和官方升级命令
+python scripts/verify_git_marketplace.py
 
 # 从发布 Zip 解压，验证无 Hook 的清单和实际二进制协议
 python scripts/verify_package.py

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$CodexPath = 'codex')
+param([string]$CodexPath = 'codex', [string]$ReadMarketplace)
 $ErrorActionPreference = 'Stop'
 
 # Use Codex's TOML editor and version lease rather than rewriting user settings.
@@ -51,6 +51,11 @@ try {
     $userLayers = @($snapshot.layers | Where-Object { $_.name.type -eq 'user' -and -not $_.name.profile })
     if ($userLayers.Count -ne 1) { throw 'Cannot identify the base user config layer' }
     $userLayer = $userLayers[0]
+    if ($ReadMarketplace) {
+        # Marketplace list omits the tracking ref and sparse paths. Return only this
+        # registration, never the full config, so installers can restore it exactly.
+        return $userLayer.config.marketplaces[$ReadMarketplace]
+    }
     $existing = $userLayer.config.features.code_mode.direct_only_tool_namespaces
     if ($null -ne $existing -and $existing -isnot [array]) { throw 'Existing direct-only namespaces must be an array' }
     $namespaces = @($existing)
