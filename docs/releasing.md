@@ -21,15 +21,23 @@ dirty checkout, a mismatched source SHA or a mismatched channel/branch.
 
 ## CI
 
-GitHub-hosted Windows runners execute formatting, Clippy, Rust unit tests,
+Alpha PRs use Windows runners for formatting, Clippy, Rust unit tests,
 Python protocol/release-policy tests, and a separate distribution build.
 The packaged binary is tested from an extracted directory, including spaces in
 its path. Artifacts contain the ZIP, SHA256SUMS.txt and source build identity.
 Runtime artifacts, local chat traces, credentials and compiled binaries are not
 committed to the source repository. Actions are pinned to commit SHAs.
 
-Required branch checks are **Quality checks** and **Package verification**.
-Normal pushes and PR merges run CI and never publish a release automatically.
+Required branch checks remain **Quality checks** and **Package verification**.
+Changes use PRs; push events no longer duplicate PR validation. Updated PRs
+cancel their obsolete CI runs. Alpha PRs run the full checks once. Promotion
+PRs on beta, rc and main use lightweight Linux jobs: enforce the stage order,
+require the merge tree to equal the source tree, locate a successful alpha CI
+package with exactly that tested tree, and retain its run/artifact/checksum
+identity. Missing, expired or mismatched evidence blocks promotion. No Rust
+compilation, protocol rerun or renamed binary occurs during promotion.
+`promotion-validation.json` links to the original evidence. A tree includes
+workflow and test files, so changing CI also requires a fresh alpha validation.
 
 ## Promote source
 
@@ -50,8 +58,10 @@ In GitHub Actions, select **Release**, choose the workflow branch and matching
 channel (`production` uses `main`). Leave **publish** disabled for an end-to-end
 validation run. Enable it explicitly to publish a GitHub Release.
 
-The workflow checks the branch, runs the reusable CI with 65-second and 90-second
-wait regressions, and reuses that run's verified build artifact. A write-scoped
+The workflow checks the branch, reuses alpha source validation, builds the final
+channel version once and checks the packaged binary, including explicit
+65-second and 90-second wait regressions. It publishes that verified artifact;
+promotion never relabels an alpha binary as a stable one. A write-scoped
 job creates an annotated `v<version>` tag and uploads the distribution, checksum
 and build identity. Non-production releases are prereleases. A rerun may finish
 an incomplete draft, but cannot replace an existing asset or retarget a tag.
