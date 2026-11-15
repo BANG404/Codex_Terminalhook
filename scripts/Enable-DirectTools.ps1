@@ -1,15 +1,29 @@
 [CmdletBinding()]
-param([string]$CodexPath = 'codex')
+param([string]$CodexPath = 'codex', [string]$ReadMarketplace)
 $ErrorActionPreference = 'Stop'
 
 # Use Codex's TOML editor and version lease rather than rewriting user settings.
 # This starts only an administrative app-server; it creates no model turn.
 $codexExecutable = (Get-Command $CodexPath -ErrorAction Stop).Source
+if ([System.IO.Path]::GetExtension($codexExecutable) -eq '.ps1') {
+    # npm installs sibling PowerShell and cmd launchers. Process.Start cannot
+    # execute the PowerShell script as a native application.
+    $cmdLauncher = [System.IO.Path]::ChangeExtension($codexExecutable, '.cmd')
+    if (-not (Test-Path -LiteralPath $cmdLauncher -PathType Leaf)) {
+        throw 'Codex requires a native executable or an npm cmd launcher'
+    }
+    $codexExecutable = $cmdLauncher
+}
 $codexConfigRoot = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 [System.IO.Directory]::CreateDirectory($codexConfigRoot) | Out-Null
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-$startInfo.FileName = $codexExecutable
-$startInfo.Arguments = 'app-server --listen stdio://'
+if ([System.IO.Path]::GetExtension($codexExecutable) -in @('.cmd', '.bat')) {
+    $startInfo.FileName = $env:ComSpec
+    $startInfo.Arguments = '/d /s /c ""' + $codexExecutable + '" app-server --listen stdio://"'
+} else {
+    $startInfo.FileName = $codexExecutable
+    $startInfo.Arguments = 'app-server --listen stdio://'
+}
 $startInfo.WorkingDirectory = (Resolve-Path -LiteralPath $codexConfigRoot).Path
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
@@ -51,6 +65,11 @@ try {
     $userLayers = @($snapshot.layers | Where-Object { $_.name.type -eq 'user' -and -not $_.name.profile })
     if ($userLayers.Count -ne 1) { throw 'Cannot identify the base user config layer' }
     $userLayer = $userLayers[0]
+    if ($ReadMarketplace) {
+        # Marketplace list omits the tracking ref and sparse paths. Return only this
+        # registration, never the full config, so installers can restore it exactly.
+        return $userLayer.config.marketplaces[$ReadMarketplace]
+    }
     $existing = $userLayer.config.features.code_mode.direct_only_tool_namespaces
     if ($null -ne $existing -and $existing -isnot [array]) { throw 'Existing direct-only namespaces must be an array' }
     $namespaces = @($existing)

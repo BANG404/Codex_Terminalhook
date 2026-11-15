@@ -18,13 +18,13 @@ def gh(*args, check=True):
     return result
 
 
-def api(path, body=None):
+def api(path, body=None, method="POST"):
     if body is None:
         return json.loads(gh("api", f"repos/{REPOSITORY}/{path}").stdout)
     with tempfile.TemporaryDirectory() as directory:
         payload = Path(directory) / "request.json"
         payload.write_text(json.dumps(body), encoding="utf-8")
-        return json.loads(gh("api", "--method", "POST", f"repos/{REPOSITORY}/{path}", "--input", str(payload)).stdout)
+        return json.loads(gh("api", "--method", method, f"repos/{REPOSITORY}/{path}", "--input", str(payload)).stdout)
 
 
 def main():

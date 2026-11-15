@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [alpha, beta, rc, main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
     inputs:
       build_package:
@@ -120,6 +121,12 @@ jobs:
       - name: Exercise the final packaged binary
         if: needs.quality.outputs.full == 'true' || inputs.build_package == true
         run: python scripts/verify_package.py
+      - name: Install the Codex CLI used for marketplace acceptance
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
+        run: npm install --global @openai/codex@0.167.0
+      - name: Verify Git marketplace migration and official binary updates
+        if: needs.quality.outputs.full == 'true' || inputs.build_package == true
+        run: python scripts/verify_git_marketplace.py
       - name: Explicit release long-wait regressions on the packaged binary
         if: inputs.long_wait == true && inputs.build_package == true
         shell: pwsh
@@ -149,5 +156,6 @@ jobs:
           path: |
             artifacts/package-protocol-tests.log
             artifacts/package-validation.json
+            artifacts/git-marketplace-validation.json
           if-no-files-found: ignore
           retention-days: 14
