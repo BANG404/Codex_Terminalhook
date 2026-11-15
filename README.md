@@ -9,7 +9,7 @@
 
 下载 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 中的 Windows x64 安装包；CI 的预览包位于 [Actions](https://github.com/BANG404/Codex_Terminalhook/actions) 运行的 artifacts 中。源码仓库不包含已编译二进制，不应将源码 checkout 当作可直接安装的二进制插件包。
 
-开发采用 `alpha → beta → rc → main` 阶段分支。阶段包版本带提交序号和源码 SHA，普通推送仅运行 CI；发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.md)。项目使用 [MIT 许可证](LICENSE)。
+开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。阶段包版本带提交序号和源码 SHA，发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.md)。项目使用 [MIT 许可证](LICENSE)。
 
 Windows x64 发布包：解压 `dist/terminalhook-windows-x64.zip` 到固定目录，执行根目录的 `install.ps1`。包内含 marketplace、插件、二进制、技能和安装说明；运行期只需要 Windows 与 Codex CLI，不需要 Rust、Python 或 Node。
 
