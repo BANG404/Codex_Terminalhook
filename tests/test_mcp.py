@@ -145,6 +145,8 @@ class McpTests(unittest.TestCase):
                             "[Console]::Error.WriteLine('STDERR:' + $line); exit 0")
                     self.client.run("", program=program, args=["-NoProfile", "-Command", code],
                                     mode=mode, on_match="keep_running", timeout_ms=30000)
+                    # Hosted runners may cold-start Windows PowerShell 5.1 slowly.
+                    # Keep startup bounded separately from the 5s input-response assertions.
                     ready = self.client.result(timeout=35)
                     self.assertEqual(ready["status"], "matched", ready)
                     ack = self.call("write_input", {
