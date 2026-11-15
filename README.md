@@ -1,67 +1,69 @@
 # TerminalHook
 
+English | [简体中文](README.zh-CN.md)
+
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-本地 Rust MCP 服务和 Codex 插件。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。
+A local Rust MCP server and Codex plugin. While a command runs, TerminalHook continuously reads its output and matches regular expressions. Each call waits until a match, exit, timeout, or cancellation. It does not return `pending`, request model sampling, or require repeated model queries while waiting.
 
-## 安装与升级
+## Installation and upgrades
 
-下载 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 中的 Windows x64 安装包；CI 的预览包位于 [Actions](https://github.com/BANG404/Codex_Terminalhook/actions) 运行的 artifacts 中。源码仓库不包含已编译二进制，不应将源码 checkout 当作可直接安装的二进制插件包。
+Download the Windows x64 package from [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases). CI preview packages are available as artifacts of [Actions](https://github.com/BANG404/Codex_Terminalhook/actions) runs. The source repository contains no compiled binaries; a source checkout is not an installable binary plugin package.
 
-开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。阶段包版本带提交序号和源码 SHA，发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.md)。项目使用 [MIT 许可证](LICENSE)。
+Development follows the `alpha → beta → rc → main` stage branches. Changes go through PRs: `alpha` receives full validation, and later promotions compare source trees and reuse the original verification artifacts, avoiding duplicate push and PR runs. Stage versions include a commit count and source SHA. Publication is triggered manually through the Release workflow. See [Development, CI/CD, and stage releases](docs/releasing.md). The project uses the [MIT license](LICENSE).
 
-Windows x64 发布包：解压 `dist/terminalhook-windows-x64.zip` 到固定目录，执行根目录的 `install.ps1`。包内含 marketplace、插件、二进制、技能和安装说明；运行期只需要 Windows 与 Codex CLI，不需要 Rust、Python 或 Node。
+For a Windows x64 release package, extract `dist/terminalhook-windows-x64.zip` to a permanent directory and run its root `install.ps1`. The package includes the marketplace, plugin, binary, skill, and installation instructions in English and Simplified Chinese. Runtime requires Windows and Codex CLI; Rust, Python, and Node are not required.
 
-从源码构建、安装或更新：
+To build, install, or update from source:
 
 ```powershell
 pwsh -NoProfile -File scripts/package.ps1
 pwsh -NoProfile -File scripts/install.ps1
 ```
 
-`package.ps1` 生成 Zip 及 `dist/SHA256SUMS.txt`。安装脚本使用标准 `codex plugin marketplace add` 和 `codex plugin add` 注册本地目录、安装并启用插件，并通过 Codex 配置编辑接口将 `mcp__terminalhook` 加入用户的 `features.code_mode.direct_only_tool_namespaces`，保留已有命名空间及其他设置。此管理过程不发起模型请求。保持该目录可用，更新后重新执行安装脚本，再新开 Codex 会话加载新版本。现有会话中的进程由原 MCP 连接管理，不做热迁移。
+`package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. The installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands to register the local directory, install the plugin, and enable it. Through the Codex configuration editing interface, it also adds `mcp__terminalhook` to the user's `features.code_mode.direct_only_tool_namespaces`, preserving existing namespaces and other settings. This administration does not send model requests. Keep the directory available, rerun the installer after an update, and open a new Codex session to load the new version. Processes in existing sessions remain managed by their original MCP connection; they are not migrated live.
 
-也可以独立配置 MCP，参考 `examples/standalone.config.toml`。独立服务和插件二选一，避免重复工具。项目中 `.codex/config.toml` 的启用设置只对受信任项目生效，也不能替代安装。插件保留默认工具审批策略；MCP 命令使用本机账户权限，不继承 Codex 内置 shell 的逐命令沙箱。
+Alternatively, configure a standalone MCP server using `examples/standalone.config.toml`. Choose either standalone MCP or the plugin to avoid duplicate tools. Enablement in a project's `.codex/config.toml` only applies to trusted projects and does not replace installation. The plugin retains the default tool approval policy. MCP commands use the local account's OS permissions and do not inherit the per-command sandbox of Codex's built-in shell.
 
-卸载：
+To uninstall:
 
 ```powershell
 codex plugin remove terminalhook@terminalhook-local
 codex plugin marketplace remove terminalhook-local
 ```
 
-## 直接调用与终端工具
+## Direct calls and terminal tools
 
-### 桌面 App 直接调用（已实测）
+### Desktop app direct calls (tested)
 
-0.4.0 起默认使用原生直接调用，不包含生命周期 Hook，也无需审阅或信任 Hook。安装器自动写入以下用户配置；手动安装插件或独立配置 MCP 时，应自行将该命名空间加入已有数组：
+Starting with 0.4.0, native direct calls are the default. There are no lifecycle hooks to review or trust. The installer writes the following user configuration automatically. When installing the plugin manually or configuring standalone MCP, add this namespace to the existing array yourself:
 
 ```toml
 [features.code_mode]
 direct_only_tool_namespaces = ["mcp__terminalhook"]
 ```
 
-新开聊天加载配置后，直接调用 `mcp__terminalhook.run_until` 并等待一次返回，不经 `functions.exec` 包装。直接调用属于宿主配置，插件 manifest 本身不能强制工具暴露方式；直接安装插件但跳过安装脚本时，必须检查该设置。项目配置可以覆盖用户设置；不支持该配置的旧宿主需先更新。命令运行及等待不使用 Codex CLI。
+Open a new chat to load the configuration, then call `mcp__terminalhook.run_until` directly and await one result, without a `functions.exec` wrapper. Direct exposure is a host setting; the plugin manifest cannot enforce how tools are exposed. If you install the plugin without running the installer, check this setting. Project configuration can override user settings. Older hosts that do not support it must be updated first. Command execution and waiting do not use Codex CLI.
 
-直接调用切换前的桌面实测：0.3.1 保留模型审计并禁用 Stop 后，工具调用耗时 120.6039 秒；完整命令执行区间 120.169 秒内，目标聊天模型请求数为 0。一次原生调用、一次结果，退出码 0，中文 stdout/stderr 各 12 条完整，模型审计在执行前后均有记录。此证据证明该调用路径，无需 Stop 等待；不等同于所有宿主或所有版本的后台请求保证。0.4.0 默认包不再提供模型审计 Hook。
+Desktop evidence collected before the direct-call switch: with 0.3.1 model auditing retained and Stop disabled, the tool call took 120.6039 seconds. During the full 120.169-second command execution interval, the target chat made zero model requests. There was one native call and one result, exit code 0, and 12 complete Chinese output entries on each of stdout and stderr. Model audit records existed both before and after execution. This evidence establishes that call path without a Stop-based wait; it does not guarantee the absence of background requests on every host or version. The default 0.4.0 package no longer includes a model audit hook.
 
-本地保留原始模型事件和调用轨迹时，可用 `scripts/audit_direct_wait.py <rollout.jsonl> <audit.jsonl>` 复核原始记录；默认使用 `artifacts/desktop-direct-call-markers.json` 中的命令起止时间。测试记录不纳入源码仓库。
+If you retain raw model events and call traces locally, inspect them using `scripts/audit_direct_wait.py <rollout.jsonl> <audit.jsonl>`. By default, it reads command start/end times from `artifacts/desktop-direct-call-markers.json`. Test records are not committed to the source repository.
 
-### 历史 Hook 版本
+### Historical hook version
 
-0.3.1 的同步 Stop Hook、后台提交和模型审计实现单独保存在 [legacy/stop-hook 分支](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。新版已移除 `submit_task`、`prepare_task`、`await_tasks`、`audit_event` 和 Hook 定义；升级后旧聊天仍需结束其 MCP 连接，再新开聊天加载新版。
+The synchronous Stop hook, background submission, and model audit implementation from 0.3.1 are preserved on the [legacy/stop-hook branch](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook). The current version removes `submit_task`, `prepare_task`, `await_tasks`, `audit_event`, and hook definitions. After upgrading, close the MCP connection in old chats and open a new chat to load the new version.
 
-### 原有终端工具
+### Terminal tools
 
-| 工具 | 行为 |
+| Tool | Behavior |
 | --- | --- |
-| `run_until` | 启动命令并等待输出条件；默认命中/超时后终止，可保留进程 |
-| `wait_output` | 用进程 ID 和游标继续等待；先重放已到达的数据，再等待新输出 |
-| `write_input` | 发送输入；可同时注册等待条件，防止遗漏即时响应 |
-| `stop_process` | 终止所管理的进程树，等待清理完成 |
+| `run_until` | Start a command and wait for an output condition; terminate on match/timeout by default, or retain the process |
+| `wait_output` | Continue waiting with a process ID and cursor; replay received data before waiting for new output |
+| `write_input` | Send input and optionally register a wait at the same time, preventing missed immediate responses |
+| `stop_process` | Terminate the managed process tree and wait for cleanup |
 
-### 启动并等待
+### Start and wait
 
 ```json
 {
@@ -78,22 +80,22 @@ direct_only_tool_namespaces = ["mcp__terminalhook"]
 }
 ```
 
-`program` 不经过隐式 shell；管道、重定向、`.cmd` 需要显式调用 `pwsh`/`cmd.exe`。`cwd` 必须绝对。`env` 添加或覆盖继承的服务环境。默认保留 stdin，支持后续输入；需要 EOF 时用 `write_input` 的 `eof: true`。
+`program` does not run through an implicit shell. Invoke `pwsh` or `cmd.exe` explicitly for pipes, redirection, and `.cmd` files. `cwd` must be absolute. `env` adds to or overrides the server's inherited environment. Stdin stays open by default for later input; use `write_input` with `eof: true` to send EOF.
 
-默认 `mode: "pipe"` 分别读取 stdout/stderr，`streams` 可选择其一或全部。交互程序可选 `mode: "pty"`，使用 Windows ConPTY，`rows` 默认 24、`cols` 默认 120，范围均为 1–500。PTY 仅提供合并的 `terminal` 输出流，`streams` 应省略或设为 `["terminal"]`；输入可能被终端回显。
+The default `mode: "pipe"` reads stdout and stderr separately. `streams` can select either or both. Interactive programs can use `mode: "pty"`, backed by Windows ConPTY. `rows` defaults to 24 and `cols` to 120; both accept 1–500. PTY provides only the merged `terminal` output stream, so omit `streams` or set it to `["terminal"]`. The terminal may echo input.
 
-PowerShell 中的中文输入、输出和原生程序管道需要统一为 UTF-8。插件技能附带 `scripts/Initialize-Utf8.ps1`，在目标 PowerShell 会话中点导入后再执行命令或脚本（路径使用实际安装位置）：
+Chinese input/output and native program pipelines in PowerShell require consistent UTF-8 encoding. The plugin skill includes `scripts/Initialize-Utf8.ps1`. Dot-source it in the target PowerShell session before running the command or script, using its actual installed path:
 
 ```powershell
 . 'D:/Projects/Codex_Terminalhook/plugins/terminalhook/skills/terminal-wait/scripts/Initialize-Utf8.ps1'
-# 在同一会话执行目标命令，例如：
+# Run the target command in the same session, for example:
 $line = [Console]::ReadLine()
 Write-Output ('ACK:' + $line)
 ```
 
-独立 MCP 部署也可在 `-Command` 命令开头直接设置 `[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)`。仅设置输出编码无法修复输入乱码；单独启动子 PowerShell 运行初始化脚本也不会改变父会话。TerminalHook 仍按原样执行 `program`/`args`，编码初始化由调用方在目标 PowerShell 中完成。
+For standalone MCP, you can instead start the `-Command` text with `[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)`. Setting only output encoding does not fix garbled input. Running the initializer in a separate child PowerShell does not configure the parent session. TerminalHook executes `program`/`args` as supplied; callers initialize encoding in the target PowerShell session.
 
-结果示例（字段省略）：
+Example result (some fields omitted):
 
 ```json
 {
@@ -115,9 +117,9 @@ Write-Output ('ACK:' + $line)
 }
 ```
 
-匹配只证明输出条件出现，不证明命令成功退出。`elapsed_ms` 是进程会话时长，`wait_elapsed_ms` 是匹配时本次等待耗时；`bytes_seen` 是原始输出字节数。Windows 的 `os_pid` 是受 Job 管理的启动器 PID，不是目标应用的 PID。
+A match establishes that the output condition occurred, not that the command exited successfully. `elapsed_ms` measures the process session lifetime; `wait_elapsed_ms` measures the current wait when a match occurs. `bytes_seen` counts raw output bytes. On Windows, `os_pid` is the Job-managed launcher's PID, not the target application's PID.
 
-### 从游标继续等待
+### Continue from a cursor
 
 ```json
 {
@@ -128,11 +130,11 @@ Write-Output ('ACK:' + $line)
 }
 ```
 
-传给 `wait_output`。使用上次返回的 `cursor`，不要使用 `latest_cursor`，后者可能越过尚未消费的输出。游标表示按接收顺序排列的**归一化输出字节位置**，可以位于一次读取内部，所以同一数据块中的后续标记不会被跳过。请把游标当作不透明值，不自行计算或跨进程复用。
+Pass this to `wait_output`. Use the previous result's `cursor`, not `latest_cursor`, which may skip output that has not been consumed. A cursor is a **normalized output byte position** in receive order. It can point inside a single read, so later markers in the same chunk are not skipped. Treat it as opaque; do not calculate cursors or reuse them across processes.
 
-每个进程保留最近 1 MiB 的归一化历史。游标落在已淘汰历史中时返回 `cursor_expired`，附 `oldest_cursor`、`latest_cursor`、日志路径和输出尾部，不会悄悄跳过数据。历史未过期时，即使进程已退出，也可重放未消费的输出。已退出会话最多保留到连接中最近 64 个会话的范围，旧 ID 会过期。
+Each process retains the latest 1 MiB of normalized history. If a cursor points into evicted history, the result is `cursor_expired`, with `oldest_cursor`, `latest_cursor`, log paths, and output tails. Data is never skipped silently. Unconsumed output can be replayed after process exit while history remains available. Exited sessions are retained within the connection's most recent 64 sessions; older IDs expire.
 
-### 发送输入并等待
+### Send input and wait
 
 ```json
 {
@@ -145,50 +147,50 @@ Write-Output ('ACK:' + $line)
 }
 ```
 
-传给 `write_input`。服务先捕获游标再发送输入，接着持续等待，不需要模型先写入再轮询。省略 `wait` 时返回 `written`。输入最多 65536 个 UTF-8 字节，换行需显式包含；PTY 通常使用 `\r`。管道可设置 `eof: true`，写入后关闭 stdin；PTY 的 EOF 应发送目标应用识别的控制字符。
+Pass this to `write_input`. The server captures the cursor before sending input, then waits continuously, without requiring the model to write and poll separately. Omitting `wait` returns `written`. Input is limited to 65536 UTF-8 bytes and must include any newline explicitly; PTY typically uses `\r`. In pipe mode, `eof: true` closes stdin after writing. For PTY EOF, send the control characters recognized by the target application.
 
-输入写入最多等待 5 秒，防止未读取 stdin 的应用堵死连接；超时会终止进程，避免未完成的写入稍后意外生效。等待响应阶段超时或取消则保留进程。`wait_output` 的超时或取消同样不会停止目标。
+Input writes wait at most 5 seconds so an application that does not read stdin cannot block the connection indefinitely. A write timeout terminates the process to prevent an incomplete write from unexpectedly taking effect later. Timeout or cancellation while waiting for a response preserves the process. The same applies to `wait_output`.
 
-### 停止
+### Stop
 
-向 `stop_process` 传入 `{"process_id":"proc_..."}`。活跃进程返回 `stopped`；已停止或未知 ID 返回 `not_running`，可重复调用。
+Pass `{"process_id":"proc_..."}` to `stop_process`. An active process returns `stopped`; an already stopped or unknown ID returns `not_running`. Repeated calls are safe.
 
-## 匹配与终止语义
+## Matching and termination semantics
 
-`until` 支持 1–16 条命名规则，名字唯一且最多 128 字节。对当前可匹配文本按规则数组顺序选择命中。使用 Rust `regex` 语法，不支持前后查找和反向引用；拒绝可能零宽匹配的规则。正则最多 4096 字节、32 个捕获组，编译体积最多 2 MiB。
+`until` accepts 1–16 named rules. Names must be unique and at most 128 bytes. Rules are selected in array order against the currently matchable text. Patterns use Rust `regex` syntax: lookaround and backreferences are unsupported, and patterns that may match zero width are rejected. Each regex is limited to 4096 bytes, 32 capture groups, and a compiled size of 2 MiB.
 
-| 模式 | 匹配范围 |
+| Mode | Matching scope |
 | --- | --- |
-| `line`（默认） | 完整行及当前未结束行，单行最多 64 KiB；不跨行 |
-| `window` | 每个输出流各自保留 `window_bytes`（256–262144）字节，支持跨行；超出窗口的内容不会参与匹配 |
+| `line` (default) | Complete lines and the current unfinished line, up to 64 KiB per line; no cross-line matching |
+| `window` | A separate `window_bytes` (256–262144) byte buffer per output stream; supports cross-line matching, excluding text outside the window |
 
-按 UTF-8 增量解码，无效字节替换为 U+FFFD；其他编码需由目标程序转换。剥离 ESC 开头的 ANSI CSI/OSC 控制序列，CR/LF 作为行边界、CRLF 归一为一个换行，不模拟光标移动后的屏幕布局。PTY 启动所需的光标位置查询在本地应答，不涉及模型。
+Output is decoded incrementally as UTF-8, replacing invalid bytes with U+FFFD. Other encodings must be converted by the target program. ESC-prefixed ANSI CSI/OSC sequences are removed. CR/LF mark line boundaries, and CRLF becomes one newline. Terminal screen layout after cursor movement is not emulated. Cursor-position queries needed for PTY startup are answered locally without involving the model.
 
-部分行会立即参与匹配，因此 `$` 仅代表当前观察到的行尾。可变长度捕获组应包含明确分隔符；若要捕获完整 URL 等以换行结束的内容，使用 `window` 模式并将分隔符写进正则。匹配文本返回最多 4096 字节，匹配和所有捕获组合计最多 8192 字节，截断时 `match_output_truncated` 为 true；匹配判定与游标仍依据完整文本。
+Partial lines are matched immediately, so `$` only means the currently observed line end. Variable-length captures should include an explicit delimiter. To capture a full URL or other newline-terminated value, use `window` mode and include the delimiter in the regex. Returned match text is limited to 4096 bytes; the match and all captures combined are limited to 8192 bytes. Truncation sets `match_output_truncated` to true. Match decisions and cursors still use the full text.
 
-| 状态 | 含义 |
+| Status | Meaning |
 | --- | --- |
-| `matched` | 正则命中；`run_until` 按 `on_match` 决定保留/终止 |
-| `exited_unmatched` | 自然退出且输出已排空，未命中，附自然退出码 |
-| `timeout` | 达到等待时限；`run_until` 按 `on_timeout` 决定保留/终止 |
-| `cursor_expired` | 请求的历史已淘汰，需要诊断或显式选择新的起点 |
-| `error` | 参数、启动、读取、日志或匹配错误 |
+| `matched` | A regex matched; `run_until` retains or terminates the process according to `on_match` |
+| `exited_unmatched` | Natural exit with output drained and no match; includes the natural exit code |
+| `timeout` | The wait deadline was reached; `run_until` follows `on_timeout` |
+| `cursor_expired` | Requested history was evicted; diagnose it or explicitly select a new starting point |
+| `error` | A parameter, startup, read, logging, or matching error |
 
-`on_match`、`on_timeout` 均默认为 `terminate`，可选 `keep_running`。`timeout_ms` 默认 300000，范围 1–600000；打包 MCP 工具超时设为 660 秒，为清理与传输保留余量。目标程序必须 flush 输出，未写入管道/终端的内容无法被观察。
+Both `on_match` and `on_timeout` default to `terminate` and also accept `keep_running`. `timeout_ms` defaults to 300000 and accepts 1–600000. The packaged MCP tool timeout is 660 seconds, leaving time for cleanup and transport. Target programs must flush their output; data not written to the pipe or terminal cannot be observed.
 
-取消 `run_until` 会终止其进程；取消后续等待只移除该等待。连接关闭会清理全部活跃进程。根命令自然退出后，仍持有管道的后代会被清理，再排空最后输出。Windows 使用带 `KILL_ON_JOB_CLOSE` 的 Job Object，目标先经过本地启动器闸门，加入 Job 后才启动，消除了目标启动到分配 Job 的竞态。正常清理会等待 Job 完成端口报告 `ACTIVE_PROCESS_ZERO`，确认后代退出后才返回；10 秒内无法确认则报告错误。硬杀 MCP 服务时，操作系统关闭 Job 也会清理后代。
+Cancelling `run_until` terminates its process. Cancelling a later wait only removes that wait. Closing the connection cleans up all active processes. After the root command exits naturally, descendants still holding pipes are cleaned up before the final output is drained. Windows uses a Job Object with `KILL_ON_JOB_CLOSE`. A local launcher gate ensures the target starts only after Job assignment, eliminating the startup-to-assignment race. Normal cleanup waits for the Job completion port to report `ACTIVE_PROCESS_ZERO`, confirming descendant exit before returning. Failure to confirm within 10 seconds returns an error. If the MCP server is forcibly killed, OS closure of the Job also cleans up descendants.
 
-## 日志与资源边界
+## Logs and resource limits
 
-每个进程持续保存原始输出到 `stdout.log`/`stderr.log` 或 `terminal.log`。每个文件最多 2 MiB，轮转保留一份 `.log.1`，`logs_rotated` 表明更早内容可能已被淘汰。日志不记录 stdin；终端回显仍可能出现在输出中。
+Each process continuously writes raw output to `stdout.log`/`stderr.log` or `terminal.log`. Each file is limited to 2 MiB, with one rotated `.log.1` copy. `logs_rotated` indicates that older output may have been evicted. Stdin is not logged, although terminal echo may appear in output.
 
-默认日志在连接专属临时目录，正常断连时删除，淘汰的旧会话临时日志也会删除。需要会话外保留时，在 `run_until` 设置绝对 `log_dir`，服务在其中创建独立进程目录；持久日志不会自动删除。异常硬杀可能留下临时日志，可按操作系统临时文件管理方式清理。
+Default logs live in a connection-specific temporary directory and are deleted on normal disconnect. Temporary logs for evicted sessions are also deleted. To retain logs beyond the session, set an absolute `log_dir` in `run_until`; the server creates a separate process directory inside it. Persistent logs are not deleted automatically. A forced termination may leave temporary logs, which can be cleaned up through normal OS temporary-file management.
 
-每连接最多 8 个活跃进程、64 个会话。输出使用有界队列，历史最多 1 MiB/进程，每流仅返回 4096 字节输出尾部。匹配后保留的命令仍持续排空输出。源码含 Unix PTY/进程组实现，当前只验证 Windows x64，不把未经运行的 Unix 分支作为发布保证。
+Each connection supports at most 8 active processes and 64 sessions. Output uses bounded queues, with at most 1 MiB of history per process and 4096 bytes of returned output tail per stream. Commands retained after a match continue draining output. The source includes Unix PTY/process-group support, but only Windows x64 is currently validated; untested Unix paths are not a release guarantee.
 
-插件仅观察其启动的命令，不能接管 Codex 内置终端。原生终端会话 ID 不是插件可订阅的输出句柄。进程、游标和临时日志仅在当前 MCP 连接有效；不承诺跨连接持久化，也不会自动拦截所有内置 shell 调用。技能会指导 Codex 在等待输出条件时使用这些工具。
+The plugin only observes commands it launches and cannot take over Codex's built-in terminal. Native terminal session IDs are not output handles the plugin can subscribe to. Processes, cursors, and temporary logs are valid only within the current MCP connection. They are not guaranteed to persist across connections. The plugin does not automatically intercept every built-in shell call. Its skill guides Codex to use these tools when waiting for output conditions.
 
-## 验证
+## Verification
 
 ```powershell
 cargo test --locked
@@ -196,28 +198,30 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo build --locked
 python -m unittest discover -s tests -v
 
-# 超过默认 60 秒客户端超时的协议回归测试
+# Protocol regressions exceeding the default 60-second client timeout
 $env:TERMINALHOOK_LONG_WAIT = '1'
 python -m unittest discover -s tests -v
 
-# 单独运行 90 秒 PowerShell 中文长任务，摘要和原始日志保存到 artifacts/
+# Run the standalone 90-second PowerShell Chinese-text task;
+# save its summary and raw logs under artifacts/
 python -m unittest discover -s tests -k powershell_utf8_long_wait -v
 
-# 从发布 Zip 解压、执行安装脚本，在隔离 Codex 目录测试缓存中的二进制
+# Extract the release ZIP, run the installer, and test the cached binary
+# in an isolated Codex directory
 python scripts/verify_plugin.py
 
-# 从发布 Zip 解压，验证无 Hook 的清单和实际二进制协议
+# Extract the release ZIP and verify the hook-free manifest and binary protocol
 python scripts/verify_package.py
 
-# 完成发布验证后核对源码、Zip、安装缓存及验收记录
+# After release validation, compare source, ZIP, installed cache, and acceptance records
 python scripts/audit_release.py
 ```
 
-协议测试仅使用 Python 3 标准库；安装验证使用 Python 3.11+ 的 `tomllib`，在隔离 Codex 目录检查安装器、缓存二进制和配置的幂等写入，不启动模型。桌面调用路径应在实际 App 聊天中验证；协议测试不能证明宿主模型请求数。历史 CLI 验证脚本仅为可选开发诊断，不是插件的默认运行或桌面验收方式。
+Protocol tests use only the Python 3 standard library. Installation verification uses Python 3.11+ `tomllib` and checks the installer, cached binary, and idempotent configuration updates in an isolated Codex directory without starting a model. Verify the desktop call path in an actual app chat; protocol tests cannot establish host model request counts. Historical CLI verification scripts are optional development diagnostics, not the default plugin runtime or desktop acceptance procedure.
 
-## 实现依据
+## Implementation references
 
-- [Codex 插件格式与 marketplace](https://developers.openai.com/plugins/build/plugins)
-- [Codex MCP 配置与超时](https://learn.chatgpt.com/docs/extend/mcp)
-- [官方 Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk)
+- [Codex plugin format and marketplaces](https://developers.openai.com/plugins/build/plugins)
+- [Codex MCP configuration and timeouts](https://learn.chatgpt.com/docs/extend/mcp)
+- [Official Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk)
 - [portable-pty / ConPTY](https://docs.rs/portable-pty/latest/portable_pty/)

@@ -1,5 +1,7 @@
 # Development and releases
 
+English | [简体中文](releasing.zh-CN.md)
+
 TerminalHook uses the stage progression `alpha -> beta -> rc -> main`.
 Feature PRs target `alpha`. Promote a tested stage through a same-repository PR;
 CI rejects skipped stages and promotions from forks. The initial repository
@@ -18,6 +20,24 @@ baseline. Change them together for the next stable release. Channel suffixes are
 derived during packaging without editing tracked files. The binary's `--version`,
 MCP server identity, packaged manifest and `build-info.json` agree. CI rejects a
 dirty checkout, a mismatched source SHA or a mismatched channel/branch.
+
+## Task completion and alpha pull requests
+
+Repository tasks finish by submitting their changes to `alpha`. The agent follows
+the checked-in [AGENTS.md](../AGENTS.md): complete the implementation and relevant
+checks, commit only the task's changes on a `codex/` branch based on the latest
+`origin/alpha`, push that branch, and create or update its pull request with
+`alpha` as the base. This submission is automatic at task completion unless the
+user requests local-only work or another destination; no additional confirmation
+is needed for the commit, push, or PR.
+
+Keep unrelated work intact and use a separate worktree for concurrent tasks.
+Write the PR title and description in English and include validation results.
+Verify its base/head, changed files, and initial CI status, then report its URL
+and actual CI state. A submitted PR may still have checks running. If submission
+fails, retain the work and report the blocker. Do not report local-only changes
+as submitted. Merging, later-stage promotion, and release publication remain
+separate actions.
 
 ## CI
 

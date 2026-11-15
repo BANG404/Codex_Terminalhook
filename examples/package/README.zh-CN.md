@@ -1,5 +1,7 @@
 # TerminalHook for Windows x64
 
+[English](README.md) | 简体中文
+
 解压本目录到固定位置（路径可包含空格），安装：
 
 ```powershell
