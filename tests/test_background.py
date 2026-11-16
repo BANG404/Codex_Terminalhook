@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from test_mcp import Client, EXE, ROOT, is_alive
+from test_mcp import Client, EXE, ROOT, is_alive, wait_for_exit
 
 OWNER = "01a1e361-731f-7020-8ba1-5fb700728b78"
 OTHER = "01a1e361-731f-7020-8ba1-5fb700728b79"
@@ -211,9 +211,11 @@ class BackgroundTests(unittest.TestCase):
         release.touch()
         self.await_state(job, lambda s: s["delivery"] == "failed")
         self.assertEqual(self.deliveries(), [])
+        # The failure is saved before the worker drops its delivery-owner lock.
+        self.assertTrue(wait_for_exit(job["worker_pid"], timeout=10))
         (self.root / "offline").unlink()
         result = self.call("retry_delivery", {"task_id": job["task_id"]})
-        self.assertEqual(result["delivery"], "delivered")
+        self.assertEqual(result.get("delivery"), "delivered", result)
         self.assertEqual(len(self.deliveries()), 1)
 
     def test_ambiguous_delivery_never_automatically_replays(self):
