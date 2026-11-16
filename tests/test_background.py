@@ -84,7 +84,9 @@ class BackgroundTests(unittest.TestCase):
         return job
 
     def state(self, job):
-        return json.loads((self.root / "tasks" / job["task_id"] / "state.json").read_text())
+        # Use the real API's shared-delete file access on Windows. Python's
+        # ordinary file reader can otherwise prevent the writer's atomic rename.
+        return self.call("get_task", {"task_id": job["task_id"]})
 
     def await_state(self, job, predicate, seconds=12):
         # One local bounded wait, never an agent/model polling loop.

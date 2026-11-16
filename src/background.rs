@@ -142,7 +142,24 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     Ok(())
 }
 fn read_json(path: &Path) -> Result<Value, String> {
-    serde_json::from_reader(File::open(path).map_err(err)?).map_err(err)
+    let mut attempts = 0;
+    let file = loop {
+        match File::open(path) {
+            Ok(file) => break file,
+            Err(error)
+                if cfg!(windows)
+                    && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+                    && attempts < 20 =>
+            {
+                // Windows can briefly deny a path lookup during atomic replacement.
+                // Retry file access locally, without polling the model or replaying work.
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(err(error)),
+        }
+    };
+    serde_json::from_reader(file).map_err(err)
 }
 fn lock(path: &Path) -> Result<File, String> {
     let file = OpenOptions::new()
