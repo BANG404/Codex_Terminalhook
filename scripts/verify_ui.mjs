@@ -13,6 +13,35 @@ const { chromium } = await import(
 const directory = path.join(root, "artifacts", "ui-verification-" + Date.now());
 await mkdir(directory, { recursive: true });
 const owner = "01a1e361-731f-7020-8ba1-5fb700728b79";
+const environment = {
+  ...process.env,
+  TERMINALHOOK_TASK_DIR: path.join(directory, "tasks"),
+  TERMINALHOOK_PROXY_COMMAND: JSON.stringify([
+    process.env.TERMINALHOOK_TEST_PYTHON || "python3",
+    path.join(root, "tests/fake_codex_proxy.py"),
+    "--proxy",
+  ]),
+  TERMINALHOOK_FAKE_STATE_DIR: directory,
+  TERMINALHOOK_FAKE_THREAD_ID: owner,
+};
+const host = spawn(
+  process.env.TERMINALHOOK_TEST_PYTHON || "python3",
+  [path.join(root, "tests/fake_codex_proxy.py"), "--host"],
+  { env: environment, stdio: ["ignore", "pipe", "inherit"] },
+);
+environment.TERMINALHOOK_FAKE_PORT = String(
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("fake host startup timed out")),
+      10000,
+    );
+    createInterface({ input: host.stdout }).once("line", (line) => {
+      clearTimeout(timer);
+      resolve(JSON.parse(line).port);
+    });
+    host.once("error", reject);
+  }),
+);
 const child = spawn(
   process.env.TERMINALHOOK_EXE ||
     path.join(
@@ -21,20 +50,9 @@ const child = spawn(
       process.platform === "win32" ? "terminalhook.exe" : "terminalhook",
     ),
   [],
-  {
-    env: {
-      ...process.env,
-      TERMINALHOOK_TASK_DIR: path.join(directory, "tasks"),
-      TERMINALHOOK_PROXY_COMMAND: JSON.stringify([
-        process.env.TERMINALHOOK_TEST_PYTHON || "python3",
-        path.join(root, "tests/fake_codex_proxy.py"),
-      ]),
-      TERMINALHOOK_FAKE_STATE_DIR: directory,
-      TERMINALHOOK_FAKE_THREAD_ID: owner,
-    },
-    stdio: ["pipe", "pipe", "inherit"],
-  },
+  { env: environment, stdio: ["pipe", "pipe", "inherit"] },
 );
+
 let id = 0;
 const pending = new Map();
 createInterface({ input: child.stdout }).on("line", (line) => {
@@ -198,6 +216,7 @@ try {
   console.log(JSON.stringify(evidence));
 } finally {
   if (browser) await browser.close();
+  host.kill();
   child.stdin.end();
   await new Promise((resolve) => {
     if (child.exitCode != null) resolve();

@@ -200,10 +200,10 @@ pub async fn submit(
         result["reused"] = json!(true);
         return Ok(result);
     }
-    tokio::select! {
-        result=bridge::probe(thread_id)=>{result?;},
+    let mut host = tokio::select! {
+        result=async {let mut host=Bridge::connect().await?;host.verify_thread(thread_id).await?;Ok::<_,String>(host)}=>result?,
         _=cancellation.cancelled()=>return Err("background submission cancelled before command launch".into()),
-    }
+    };
     if cancellation.is_cancelled() {
         return Err("background submission cancelled before command launch".into());
     }
@@ -216,6 +216,29 @@ pub async fn submit(
     write_json(&path.join("request.json"), &job)?;
     let mut state = json!({"task_id":task_id,"thread_id":thread_id,"status":"queued","delivery":"pending","created_at_ms":now_ms()});
     write_json(&path.join("state.json"), &state)?;
+    // Ask the existing host to launch outside the MCP server's process containment.
+    // In particular, Codex's Windows MCP Job Object deliberately forbids breakaway.
+    let launched = host.launch_worker(&path).await;
+    host.close().await;
+    match launched {
+        Ok(pid) => {
+            state["worker_pid"] = json!(pid);
+            state["status"] = json!("submitted");
+            state["state_dir"] = json!(path);
+            Ok(state)
+        }
+        Err(error) => {
+            write_json(&path.join("launch-error.json"), &json!({"error":error}))?;
+            Err(format!(
+                "background launch was not acknowledged; inspect the existing task {} at {} before retrying; never replay the command: {error}",
+                job.task_id,
+                path.display()
+            ))
+        }
+    }
+}
+
+pub fn spawn_worker(path: &Path) -> Result<std::process::Child, String> {
     let diagnostics = OpenOptions::new()
         .create(true)
         .append(true)
@@ -224,7 +247,7 @@ pub async fn submit(
     let mut command = std::process::Command::new(std::env::current_exe().map_err(err)?);
     command
         .arg("--background-worker")
-        .arg(&path)
+        .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(diagnostics);
@@ -245,34 +268,16 @@ pub async fn submit(
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000 | 0x00000200 | 0x01000000);
     }
-    match command.spawn() {
-        Ok(mut child) => {
-            let pid = child.id();
-            // Reap while this connection lives; detached execution survives its shutdown.
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-            state["worker_pid"] = json!(pid);
-            state["status"] = json!("submitted");
-            state["state_dir"] = json!(path);
-            Ok(state)
-        }
-        Err(error) => {
-            state["status"] = json!("launch_failed");
-            state["error"] = json!(error.to_string());
-            write_json(&path.join("state.json"), &state)?;
-            Err(format!(
-                "background worker failed to launch; task preserved at {}: {error}",
-                path.display()
-            ))
-        }
-    }
+    command.spawn().map_err(err)
 }
 
 pub async fn get(id: &str, thread_id: &str) -> Result<Value, String> {
     let (path, _) = owned_job(id, thread_id)?;
     let mut state = read_json(&path.join("state.json"))?;
     state["state_dir"] = json!(path);
+    if path.join("launch-error.json").exists() {
+        state["launch_error"] = read_json(&path.join("launch-error.json"))?;
+    }
     if path.join("result.json").exists() {
         state["result"] = read_json(&path.join("result.json"))?;
     }

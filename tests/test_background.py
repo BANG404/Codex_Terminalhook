@@ -1,5 +1,7 @@
 """Verify detached execution and the host wake boundary, without model calls."""
 import json
+import queue
+import threading
 import os
 from pathlib import Path
 import subprocess
@@ -21,11 +23,16 @@ class BackgroundTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.environment = patch.dict(os.environ, {
             "TERMINALHOOK_TASK_DIR": str(self.root / "tasks"),
-            "TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, str(ROOT / "tests/fake_codex_proxy.py")]),
+            "TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, str(ROOT / "tests/fake_codex_proxy.py"), "--proxy"]),
             "TERMINALHOOK_FAKE_STATE_DIR": str(self.root),
             "TERMINALHOOK_FAKE_THREAD_ID": OWNER,
         })
         self.environment.start()
+        self.host = subprocess.Popen([sys.executable, str(ROOT / "tests/fake_codex_proxy.py"), "--host"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        ready = queue.Queue()
+        threading.Thread(target=lambda: ready.put(self.host.stdout.readline()), daemon=True).start()
+        os.environ["TERMINALHOOK_FAKE_PORT"] = str(json.loads(ready.get(timeout=10))["port"])
         self.client = Client()
         self.jobs = []
         self.counter = 2
@@ -43,6 +50,10 @@ class BackgroundTests(unittest.TestCase):
                 pass
         if self.client:
             self.client.close()
+        self.host.terminate()
+        self.host.wait(timeout=5)
+        self.host.stdout.close()
+        self.host.stderr.close()
         self.environment.stop()
         self.temp.cleanup()
 
@@ -93,6 +104,23 @@ class BackgroundTests(unittest.TestCase):
         retry = self.call("retry_delivery", {"task_id": job["task_id"]})
         self.assertEqual(retry["delivery"], "delivered")
         self.assertEqual(len(self.deliveries()), 1)
+
+    @unittest.skipUnless(os.name == "nt", "Windows MCP Job Object containment")
+    def test_host_launch_survives_strict_mcp_job_termination(self):
+        import ctypes
+        from fake_codex_proxy import windows_job
+        handle = windows_job(int(self.client.proc._handle), allow_breakaway=False)
+        try:
+            job = self.submit("import time; time.sleep(.7); print('survived strict MCP job')")
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            self.assertTrue(kernel.TerminateJobObject(handle, 99))
+            self.client.close()
+            self.client = Client()
+            self.await_state(job, lambda s: s["delivery"] == "delivered")
+            self.assertEqual(len(self.deliveries()), 1)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
 
     def test_idempotency_and_cross_chat_isolation(self):
         count = self.root / "count"

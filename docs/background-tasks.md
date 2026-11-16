@@ -13,6 +13,10 @@ periodic hook, Stop hook, a second app server, or `codex exec`.
 The Codex host must supply `threadId` in MCP request metadata and have a running
 shared app-server daemon with the original chat loaded. The worker connects to
 that daemon through `codex app-server proxy`; it never starts a replacement.
+The daemon runs a short `command/exec` launcher, which starts the worker outside
+the MCP server's process containment. This is necessary on Windows, where
+Codex deliberately forbids children escaping its MCP Job Object. The launcher
+uses the host's command policy; an unsupported or denied launch fails visibly.
 `check_background {}` checks this route without starting a model turn. A host
 without the metadata or daemon is rejected before any command starts. The
 current implementation has been probed against Codex Desktop daemon 0.169.0;
@@ -87,7 +91,9 @@ transport failure. Never recover status by restarting the command.
 State and rotating logs live in `TERMINALHOOK_TASK_DIR`, otherwise
 `PLUGIN_DATA/tasks`, otherwise `$CODEX_HOME/terminalhook/tasks` (using the
 normal user Codex home when unset). Files include `request.json`, `state.json`,
-`result.json`, and worker diagnostics. The task directory is private on Unix.
+`result.json`, and worker diagnostics. A missing launch acknowledgment is saved
+in `launch-error.json`; retain the task key and inspect the saved task rather
+than dispatching another command. The task directory is private on Unix.
 Requests can contain sensitive environment values; keep the directory private.
 MCP disconnection leaves submitted background workers alive; cancel them
 explicitly before deleting their state. A worker killed by the OS is not

@@ -141,6 +141,33 @@ impl Bridge {
         }})).await
     }
 
+    pub async fn launch_worker(&mut self, path: &std::path::Path) -> Result<u32, String> {
+        let environment: serde_json::Map<String, Value> = std::env::vars()
+            .filter(|(key, _)| key.starts_with("TERMINALHOOK_") || key == "CODEX_HOME")
+            .map(|(key, value)| (key, json!(value)))
+            .collect();
+        let receipt=self.rpc("command/exec",json!({
+            "command":[std::env::current_exe().map_err(|e|e.to_string())?,"--launch-background-worker",path],
+            "cwd":path,"timeoutMs":10000,"env":environment
+        })).await?;
+        if receipt["exitCode"] != 0 {
+            return Err(format!(
+                "Codex worker launcher failed: {}",
+                receipt["stderr"]
+            ));
+        }
+        let output: Value = serde_json::from_str(
+            receipt["stdout"]
+                .as_str()
+                .ok_or("launcher stdout is missing")?,
+        )
+        .map_err(|e| e.to_string())?;
+        output["worker_pid"]
+            .as_u64()
+            .and_then(|pid| u32::try_from(pid).ok())
+            .ok_or_else(|| "launcher worker_pid is missing".into())
+    }
+
     pub async fn close(mut self) {
         let _ = timeout(Duration::from_secs(2), self.socket.close(None)).await;
         let _ = self.child.kill().await;

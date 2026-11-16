@@ -511,6 +511,8 @@
           detail.replaceChildren(dl);
           if (task.delivery_error)
             detail.append(element("p", task.delivery_error));
+          if (task.launch_error?.error || task.error)
+            detail.append(element("p", task.launch_error?.error || task.error));
           const tail = task.result?.output_tail || task.output_tail || {};
           detail.append(
             element("h3", t("output")),

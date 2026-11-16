@@ -10,6 +10,9 @@
 
 Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 App Server daemon，
 且原聊天已加载。worker 通过 `codex app-server proxy` 连接现有 daemon，不启动替代服务。
+daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
+这对 Windows 尤为必要，因为 Codex 明确禁止子进程脱离 MCP Job Object。
+启动器遵循宿主的命令策略；不支持或拒绝启动时会明确报错。
 `check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
 提交会在启动命令前失败。当前桥接已在 Codex Desktop daemon 0.169.0 上完成连通性检查；
 普通终端工具不依赖此后台桥接。
@@ -76,6 +79,8 @@ daemon 不可用或原聊天未加载时，交付状态为 `failed`。
 状态与轮转日志保存在 `TERMINALHOOK_TASK_DIR`，其次为 `PLUGIN_DATA/tasks`，
 再其次为 `$CODEX_HOME/terminalhook/tasks`；未设置 Codex home 时使用普通用户目录。
 文件包括 `request.json`、`state.json`、`result.json` 和 worker 诊断。
+启动回执缺失时，错误保存到 `launch-error.json`；应保留原任务键并核查已保存任务，
+不要再分派一次命令。
 Unix 下任务目录限制为用户私有。请求可能包含敏感环境变量，应保持目录私有。
 MCP 断连不会停止已提交的后台 worker；删除状态前应明确取消任务。
 被操作系统终止的 worker 不会自动重启；`worker_live: false` 表示控制端点不可用，
