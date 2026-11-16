@@ -38,6 +38,8 @@ Git 安装需要已安装 Codex CLI 和 Git。Windows 使用 `marketplace` 或 `
 
 插件负责它启动的命令，不能订阅 Codex 内置终端。普通进程句柄、输出游标和临时日志仅在当前 MCP 连接有效；重连会清理原进程。MCP 命令使用本机账户权限，保留 Codex 默认工具审批行为。
 
-长时间后台工作先用 `check_background` 检查宿主，再用稳定的 `task_key`、程序/参数及绝对 `cwd` 调用 `submit_task`。省略 `timeout_ms` 表示无执行期限，省略 `until` 表示自然退出；调用立即返回，随后结束回合等待原聊天收到结果，不要轮询模型。后台 worker 及已保存结果可跨越 MCP 断连，但重启后不会恢复命令执行。兼容宿主中，`list_tasks` 打开中英文 MCP Apps 面板；`get_task`、`cancel_task`、`retry_delivery` 支持查看、取消和恢复。后台模式需要运行中的共享 Codex daemon、CLI proxy 及宿主提供的 `threadId` 元数据。交付失败保留结果，投递结果未知时不盲目重发。详见[完整指南](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.zh-CN.md)。
+长时间后台工作先用 `check_background` 检查宿主，再用稳定的 `task_key`、程序/参数及绝对 `cwd` 调用 `submit_task`。省略 `timeout_ms` 表示无执行期限，省略 `until` 表示自然退出；调用立即返回，随后结束回合等待原聊天收到结果，不要轮询模型。后台 worker 及已保存结果可跨越 MCP 断连，但重启后不会恢复命令执行。兼容宿主中，`list_tasks` 打开紧凑的英语 MCP Apps 面板；`get_task`、`cancel_task`、`retry_delivery` 支持查看、取消和恢复。后台模式需要运行中的共享 Codex daemon、CLI proxy 及宿主提供的 `threadId` 元数据。交付失败保留结果，投递结果未知时不盲目重发。详见[完整指南](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.zh-CN.md)。
+
+对于默认使用 stdio 的 Windows 桌面宿主，关闭桌面后，在本解压目录运行 `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1`。此可选适配器让桌面和 worker 共用一个核心，不修改持久设置或命令权限；已有聊天需要在该会话中重新打开。源码构建和隔离测试选项见完整指南。正常启动桌面即可恢复默认传输。
 
 卸载：`codex plugin remove terminalhook@terminalhook-local`；随后可按需执行 `codex plugin marketplace remove terminalhook-local`。
