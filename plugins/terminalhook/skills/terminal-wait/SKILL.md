@@ -23,6 +23,16 @@ Use `check_background` before first background submission. The host must provide
 
 ## Timeouts and recovery
 
+For a failed `check_background`, report the actual proxy executable, exit status,
+and stderr tail returned by the tool. The proxy prefers an explicit
+`TERMINALHOOK_CODEX_BIN`, then the host's `CODEX_APP_RUNTIME_CLI_PATH`, then PATH;
+`TERMINALHOOK_PROXY_COMMAND` overrides that selection. A stdio-only desktop
+app-server has no shared control endpoint. Opening another chat does not fix
+that limitation. Never start a replacement server or resume the chat into a
+different daemon to make preflight appear successful. Use ordinary terminal
+tools when no compatible shared host is available. Retained diagnostics include
+the last 16 KiB of proxy stderr; saved delivery failures keep this in task state.
+
 Choose a timeout for the expected task duration, at most `600000` ms and below the client's actual tool timeout (the packaged MCP limit is 660 seconds). For a several-minute build or CI wait, use an appropriate several-minute budget instead of repeated 30- or 60-second waits. Do not shorten waits solely to produce periodic commentary, and do not poll shell/status tools while a wait is pending.
 
 Treat a timeout as a recovery boundary. Inspect the returned status, output tail, and logs as needed, and report what remains unresolved. Do not automatically call `wait_output` again for the same condition, restart the command, or resend input. Continue only with a concrete reason based on new diagnostic evidence or an explicit instruction to keep waiting. A task exceeding the per-call limit needs a bounded continuation plan with an overall deadline, rather than an open-ended timeout loop.

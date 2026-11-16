@@ -1,6 +1,6 @@
 {
   "name": "terminalhook",
-  "version": "0.5.0-alpha.51.g257b91d92954",
+  "version": "0.5.0-alpha.61.g2d6613d27667",
   "description": "Wait locally for terminal events through direct MCP calls without model polling.",
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
