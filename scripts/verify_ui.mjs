@@ -195,7 +195,10 @@ try {
     });
   });
   await page.locator("iframe").evaluate((frame, html) => {
-    frame.srcdoc = html;
+    // Exercise the real deadline callback without waiting ten minutes. The
+    // callback is invoked explicitly only after the first completion below.
+    const clock = `<script>const nativeTimeout=window.setTimeout.bind(window);window.setTimeout=(fn,ms,...args)=>{const id=nativeTimeout(fn,ms,...args);if(ms===600000)window.expireTaskSubscription=()=>{clearTimeout(id);fn(...args)};return id};</script>`;
+    frame.srcdoc = html.replace("<head>", "<head>" + clock);
   }, html);
   const frame = page.frameLocator("iframe");
   async function notify(params) {
@@ -229,6 +232,18 @@ try {
   await frame.getByLabel("Delivery: delivered", {exact: true}).waitFor();
   await frame.locator('#detail[aria-busy="false"]').waitFor();
   await frame.locator("main").screenshot({path:path.join(root,"artifacts/dashboard-completed.png")});
+  const subscriptions = await page.evaluate(() => window.toolCalls.filter(name => name === "watch_tasks").length);
+  await frame.locator("body").evaluate(() => window.expireTaskSubscription());
+  await page.waitForFunction(count => window.toolCalls.filter(name => name === "watch_tasks").length > count, subscriptions);
+  const later = (await tool("submit_task", {
+    task_key: "dashboard-after-timeout", program: process.env.TERMINALHOOK_TEST_PYTHON || "python3",
+    args: ["-u", "-c", "import time;time.sleep(2);print('After timeout completed')"], cwd: root,
+  })).structuredContent;
+  assert.equal(later.status, "submitted");
+  const renewedRow = frame.getByRole("button", {name: /dashboard-after-timeout completed/});
+  await renewedRow.waitFor();
+  await renewedRow.getByLabel("Delivery: delivered", {exact:true}).waitFor();
+  await frame.locator('#detail[aria-busy="false"]').waitFor();
   const callsAfterCompletion = await page.evaluate(() => window.toolCalls.length);
   // Longer than the former three-second refresh interval: no background calls.
   await page.waitForTimeout(4200);
@@ -450,6 +465,7 @@ try {
     no_idle_or_visibility_polling: true,
     callback_updates: true,
     native_worker_event_updates: true,
+    timeout_callback_renews_without_refresh: true,
     no_selected_row_border: true,
     callback_echo_no_loop: true,
     filtering: true,
