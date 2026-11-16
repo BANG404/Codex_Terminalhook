@@ -28,8 +28,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let action = args.next();
     if action.as_deref() == Some("--launch-background-worker") {
         let path = args.next().ok_or("missing task directory")?;
-        let child = background::spawn_worker(std::path::Path::new(&path))?;
-        println!("{}", serde_json::json!({"worker_pid":child.id()}));
+        let pid = background::spawn_worker(std::path::Path::new(&path))?;
+        println!("{}", serde_json::json!({"worker_pid":pid}));
         return Ok(());
     }
     if let Some(action @ ("--background-worker" | "--probe-host")) = action.as_deref() {

@@ -17,6 +17,8 @@ The daemon runs a short `command/exec` launcher, which starts the worker outside
 the MCP server's process containment. This is necessary on Windows, where
 Codex deliberately forbids children escaping its MCP Job Object. The launcher
 uses the host's command policy; an unsupported or denied launch fails visibly.
+Windows workers inherit no launcher handles, so open task streams cannot delay
+the short launch acknowledgment.
 `check_background {}` checks this route without starting a model turn. A host
 without the metadata or daemon is rejected before any command starts. The
 current implementation has been probed against Codex Desktop daemon 0.169.0;

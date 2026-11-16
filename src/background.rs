@@ -13,7 +13,6 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    process::Stdio,
     time::Duration,
 };
 use tokio::{
@@ -22,6 +21,8 @@ use tokio::{
     time::timeout,
 };
 use tokio_util::sync::CancellationToken;
+#[cfg(windows)]
+mod windows;
 
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -238,37 +239,40 @@ pub async fn submit(
     }
 }
 
-pub fn spawn_worker(path: &Path) -> Result<std::process::Child, String> {
-    let diagnostics = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path.join("worker.log"))
-        .map_err(err)?;
-    let mut command = std::process::Command::new(std::env::current_exe().map_err(err)?);
-    command
-        .arg("--background-worker")
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(diagnostics);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
+pub fn spawn_worker(path: &Path) -> Result<u32, String> {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000 | 0x00000200 | 0x01000000);
+        windows::spawn(path)
     }
-    command.spawn().map_err(err)
+    #[cfg(unix)]
+    {
+        use std::process::Stdio;
+        let diagnostics = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path.join("worker.log"))
+            .map_err(err)?;
+        let mut command = std::process::Command::new(std::env::current_exe().map_err(err)?);
+        command
+            .arg("--background-worker")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(diagnostics);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        command.spawn().map(|child| child.id()).map_err(err)
+    }
 }
 
 pub async fn get(id: &str, thread_id: &str) -> Result<Value, String> {

@@ -13,6 +13,7 @@ Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 
 daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
 这对 Windows 尤为必要，因为 Codex 明确禁止子进程脱离 MCP Job Object。
 启动器遵循宿主的命令策略；不支持或拒绝启动时会明确报错。
+Windows worker 不继承启动器句柄，任务输出流不会拖住短暂的启动确认。
 `check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
 提交会在启动命令前失败。当前桥接已在 Codex Desktop daemon 0.169.0 上完成连通性检查；
 普通终端工具不依赖此后台桥接。

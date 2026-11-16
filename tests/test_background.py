@@ -38,6 +38,10 @@ class BackgroundTests(unittest.TestCase):
         self.counter = 2
 
     def tearDown(self):
+        known = {job["task_id"] for job in self.jobs}
+        for directory in (self.root / "tasks").glob("task_*"):
+            if directory.name not in known and (directory / "state.json").exists():
+                self.jobs.append({"task_id": directory.name})
         for job in self.jobs:
             path = self.root / "tasks" / job["task_id"]
             try:
@@ -46,6 +50,11 @@ class BackgroundTests(unittest.TestCase):
                 self.await_state(job, lambda s: s["status"] not in ("queued", "running"))
                 # The execution result is written before the delivery owner releases its lock.
                 self.await_state(job, lambda s: s["delivery"] in ("delivered", "failed", "uncertain"))
+                pid = self.state(job).get("worker_pid")
+                if pid:
+                    deadline = time.monotonic() + 10
+                    while is_alive(pid) and time.monotonic() < deadline:
+                        time.sleep(0.02)
             except (OSError, AssertionError):
                 pass
         if self.client:
@@ -155,8 +164,10 @@ class BackgroundTests(unittest.TestCase):
         self.assertFalse(marker.exists())
 
     def test_failed_delivery_retries_saved_result_without_rerunning(self):
-        job = self.submit("import time; time.sleep(.5); print('saved result')")
+        release = self.root / "release-task"
+        job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('saved result')")
         (self.root / "offline").touch()
+        release.touch()
         self.await_state(job, lambda s: s["delivery"] == "failed")
         self.assertEqual(self.deliveries(), [])
         (self.root / "offline").unlink()
