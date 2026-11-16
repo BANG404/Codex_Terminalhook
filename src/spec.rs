@@ -1,38 +1,38 @@
 use crate::matcher::Rule;
 use regex::RegexBuilder;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-#[derive(Clone, Copy, Default, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     #[default]
     Terminate,
     KeepRunning,
 }
-#[derive(Clone, Copy, Default, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
     #[default]
     Pipe,
     Pty,
 }
-#[derive(Clone, Copy, Default, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchMode {
     #[default]
     Line,
     Window,
 }
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuleInput {
     pub name: String,
     pub pattern: String,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WaitSpec {
     /// 1..16 named Rust regex patterns. For one-shot tasks, target the final outcome,
@@ -66,7 +66,7 @@ fn default_cols() -> u16 {
     120
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunRequest {
     /// Executable, not an implicit shell; invoke pwsh/cmd explicitly for shell syntax.
@@ -149,6 +149,10 @@ pub fn validate_wait(input: &WaitSpec, mode: Mode) -> Result<Vec<Rule>, String> 
     if !(1..=600_000).contains(&input.timeout_ms) {
         return Err("timeout_ms must be in 1..600000".into());
     }
+    validate_rules(input, mode)
+}
+
+pub fn validate_rules(input: &WaitSpec, mode: Mode) -> Result<Vec<Rule>, String> {
     if !(256..=262144).contains(&input.window_bytes) {
         return Err("window_bytes must be in 256..262144".into());
     }

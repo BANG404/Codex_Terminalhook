@@ -5,7 +5,7 @@ English | [简体中文](README.zh-CN.md)
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-TerminalHook is a Rust MCP server and Codex plugin for event-driven terminal waits and interactive process control. While a command runs, it continuously reads its output and matches regular expressions. Each call waits until a match, exit, timeout, or cancellation. It does not return `pending`, request model sampling, or require repeated model queries while waiting.
+TerminalHook is a Rust MCP server and Codex plugin for event-driven terminal waits and interactive process control. While a command runs, it continuously reads its output and matches regular expressions. Each call waits until a match, exit, timeout, or cancellation. Direct waits do not return `pending`, request model sampling, or require repeated model queries while waiting. Explicit background tasks return immediately, continue independently, and deliver a saved result to the original chat.
 
 Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS Intel/Apple Silicon. Each target runs Rust and MCP protocol tests plus extracted-package, installation, and Git marketplace update checks. Windows uses Job Objects and ConPTY; Linux/macOS use process groups and Unix PTYs.
 
@@ -15,6 +15,7 @@ Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS In
 - **Continue from saved output:** use `wait_output` with a process ID and cursor to consume output received since the previous result.
 - **Control interactive commands:** use pipe or PTY mode and send input with `write_input`, optionally waiting for the response in the same call.
 - **Manage process lifetime:** retain commands when needed, or stop their process trees with `stop_process`; raw output is saved to rotating logs.
+- **Run long background tasks:** use `submit_task` to wait beyond an MCP call or disconnection, then receive a result in the original chat. A bilingual MCP Apps dashboard shows task and delivery state. See [background tasks and dashboard](docs/background-tasks.md).
 - **Integrate with Codex:** install the plugin with its `terminal-wait` skill or configure standalone MCP. Current versions use direct tool calls without lifecycle hooks.
 
 [Installation and upgrades](#installation-and-upgrades) · [Tool reference](#terminal-tools) · [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) · [Development and releases](docs/releasing.md)
@@ -85,7 +86,7 @@ Starting with 0.4.0, native direct calls are the default. There are no lifecycle
 direct_only_tool_namespaces = ["mcp__terminalhook"]
 ```
 
-Open a new chat to load the configuration, then call `mcp__terminalhook.run_until` directly and await one result, without a `functions.exec` wrapper. Direct exposure is a host setting; the plugin manifest cannot enforce how tools are exposed. If you install the plugin without running the installer, check this setting. Project configuration can override user settings. Older hosts that do not support it must be updated first. Command execution and waiting do not use Codex CLI.
+Open a new chat to load the configuration, then call `mcp__terminalhook.run_until` directly and await one result, without a `functions.exec` wrapper. Direct exposure is a host setting; the plugin manifest cannot enforce how tools are exposed. If you install the plugin without running the installer, check this setting. Project configuration can override user settings. Older hosts that do not support it must be updated first. Ordinary command execution and waiting do not use Codex CLI. Background completion delivery uses the existing daemon through `codex app-server proxy`, without `codex exec` or model polling.
 
 Desktop evidence collected before the direct-call switch: with 0.3.1 model auditing retained and Stop disabled, the tool call took 120.6039 seconds. During the full 120.169-second command execution interval, the target chat made zero model requests. There was one native call and one result, exit code 0, and 12 complete Chinese output entries on each of stdout and stderr. Model audit records existed both before and after execution. This evidence establishes that call path without a Stop-based wait; it does not guarantee the absence of background requests on every host or version. The default 0.4.0 package no longer includes a model audit hook.
 
@@ -93,7 +94,7 @@ If you retain raw model events and call traces locally, inspect them using `scri
 
 ### Historical hook version
 
-The synchronous Stop hook, background submission, and model audit implementation from 0.3.1 are preserved on the [legacy/stop-hook branch](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook). The current version removes `submit_task`, `prepare_task`, `await_tasks`, `audit_event`, and hook definitions. After upgrading, close the MCP connection in old chats and open a new chat to load the new version.
+The synchronous Stop hook, background submission, and model audit implementation from 0.3.1 are preserved on the [legacy/stop-hook branch](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook). The current version retains no lifecycle hook definitions or `prepare_task`, `await_tasks`, or `audit_event`. Its new `submit_task` is an independent durable-worker API, not the historical Stop-hook implementation. After upgrading, close the MCP connection in old chats and open a new chat to load the new version.
 
 ### Terminal tools
 
@@ -103,6 +104,8 @@ The synchronous Stop hook, background submission, and model audit implementation
 | `wait_output` | Continue waiting with a process ID and cursor; replay received data before waiting for new output |
 | `write_input` | Send input and optionally register a wait at the same time, preventing missed immediate responses |
 | `stop_process` | Terminate the managed process tree and wait for cleanup |
+
+For work explicitly requested to continue beyond a call, use `check_background`, `submit_task`, `list_tasks`, `get_task`, `cancel_task`, and `retry_delivery`. See the [background task guide](docs/background-tasks.md) for deadlines, persistence, safe recovery, and the embedded dashboard.
 
 ### Avoid model-driven polling
 

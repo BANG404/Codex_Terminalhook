@@ -5,7 +5,7 @@
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-TerminalHook 是 Rust MCP 服务和 Codex 插件，支持事件驱动的终端等待与交互式进程控制。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。
+TerminalHook 是 Rust MCP 服务和 Codex 插件，支持事件驱动的终端等待与交互式进程控制。命令运行时，程序持续读取终端输出并匹配正则；调用一直等待到命中、退出、超时或取消。直接等待期间不返回 `pending`、不请求模型采样，也不要求模型反复查询。明确提交的后台任务立即返回、独立运行，并向原聊天交付已保存结果。
 
 原生测试和分发覆盖 Windows x64、Linux x64/ARM64，以及 macOS Intel/Apple Silicon。每个目标均运行 Rust 和 MCP 协议测试，并验证解压包、安装及 Git marketplace 更新。Windows 使用 Job Object 和 ConPTY；Linux/macOS 使用进程组和 Unix PTY。
 
@@ -15,6 +15,7 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，支持事件驱动的终端�
 - **接续读取输出：** 使用 `wait_output`、进程 ID 和游标，读取上次返回后收到的输出。
 - **控制交互命令：** 支持管道和 PTY 模式，使用 `write_input` 发送输入，并可在同一次调用中等待响应。
 - **管理进程生命周期：** 按需保留命令，或使用 `stop_process` 停止其进程树；原始输出保存到轮转日志。
+- **执行长时间后台任务：** 使用 `submit_task` 跨越 MCP 调用或断连等待，完成后向原聊天交付结果；中英文 MCP Apps 面板展示执行与交付状态。参见[后台任务与任务面板](docs/background-tasks.zh-CN.md)。
 - **集成 Codex：** 安装包含 `terminal-wait` 技能的插件，或配置独立 MCP。当前版本使用直接工具调用，无需生命周期 Hook。
 
 [安装与升级](#安装与升级) · [工具参考](#原有终端工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
@@ -85,7 +86,7 @@ codex plugin marketplace remove terminalhook-local
 direct_only_tool_namespaces = ["mcp__terminalhook"]
 ```
 
-新开聊天加载配置后，直接调用 `mcp__terminalhook.run_until` 并等待一次返回，不经 `functions.exec` 包装。直接调用属于宿主配置，插件 manifest 本身不能强制工具暴露方式；直接安装插件但跳过安装脚本时，必须检查该设置。项目配置可以覆盖用户设置；不支持该配置的旧宿主需先更新。命令运行及等待不使用 Codex CLI。
+新开聊天加载配置后，直接调用 `mcp__terminalhook.run_until` 并等待一次返回，不经 `functions.exec` 包装。直接调用属于宿主配置，插件 manifest 本身不能强制工具暴露方式；直接安装插件但跳过安装脚本时，必须检查该设置。项目配置可以覆盖用户设置；不支持该配置的旧宿主需先更新。普通命令运行及等待不使用 Codex CLI；后台结果交付通过 `codex app-server proxy` 连接现有 daemon，不使用 `codex exec`，不轮询模型。
 
 直接调用切换前的桌面实测：0.3.1 保留模型审计并禁用 Stop 后，工具调用耗时 120.6039 秒；完整命令执行区间 120.169 秒内，目标聊天模型请求数为 0。一次原生调用、一次结果，退出码 0，中文 stdout/stderr 各 12 条完整，模型审计在执行前后均有记录。此证据证明该调用路径，无需 Stop 等待；不等同于所有宿主或所有版本的后台请求保证。0.4.0 默认包不再提供模型审计 Hook。
 
@@ -93,7 +94,7 @@ direct_only_tool_namespaces = ["mcp__terminalhook"]
 
 ### 历史 Hook 版本
 
-0.3.1 的同步 Stop Hook、后台提交和模型审计实现单独保存在 [legacy/stop-hook 分支](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。新版已移除 `submit_task`、`prepare_task`、`await_tasks`、`audit_event` 和 Hook 定义；升级后旧聊天仍需结束其 MCP 连接，再新开聊天加载新版。
+0.3.1 的同步 Stop Hook、后台提交和模型审计实现单独保存在 [legacy/stop-hook 分支](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。当前版本不包含生命周期 Hook 定义或 `prepare_task`、`await_tasks`、`audit_event`；新的 `submit_task` 是独立持久 worker API，与历史 Stop Hook 实现不同；升级后旧聊天仍需结束其 MCP 连接，再新开聊天加载新版。
 
 ### 原有终端工具
 
@@ -103,6 +104,8 @@ direct_only_tool_namespaces = ["mcp__terminalhook"]
 | `wait_output` | 用进程 ID 和游标继续等待；先重放已到达的数据，再等待新输出 |
 | `write_input` | 发送输入；可同时注册等待条件，防止遗漏即时响应 |
 | `stop_process` | 终止所管理的进程树，等待清理完成 |
+
+明确要求跨越单次调用运行时，可使用 `check_background`、`submit_task`、`list_tasks`、`get_task`、`cancel_task`、`retry_delivery`。期限、持久化、安全恢复与内嵌面板见[后台任务指南](docs/background-tasks.zh-CN.md)。
 
 ### 避免模型驱动的轮询
 

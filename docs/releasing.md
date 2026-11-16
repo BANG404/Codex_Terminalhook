@@ -184,6 +184,27 @@ tool exposure and desktop behavior must still be verified in the actual app.
 The default package has no lifecycle hooks; the historical 0.3.1 implementation
 is preserved on `legacy/stop-hook`.
 
+## Dashboard verification
+
+The Linux x64 alpha test job also runs the embedded MCP Apps dashboard in
+Playwright against the real TerminalHook stdio server and a deterministic host
+fixture. It verifies the resource, task tools, language switching, escaped
+output, and absence of external requests or UI model messages. These checks
+contribute to `Quality checks`; native desktop rendering remains a separate
+host integration check. Node 20+ and the locked Playwright development
+packages are needed only for browser verification, not for the installed MCP
+binary. Run locally after `cargo build`:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:ui
+```
+
+Screenshots and evidence are written under ignored `artifacts/` and uploaded by
+CI. Background execution/host-delivery regressions run in the ordinary Python
+protocol suite on every native platform. See [background tasks](background-tasks.md).
+
 ## Local build
 
 Build on the target OS/architecture with Python 3.11+ and the pinned Rust toolchain:
