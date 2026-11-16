@@ -15,14 +15,31 @@ daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理�
 启动器遵循宿主的命令策略；不支持或拒绝启动时会明确报错。
 Windows worker 不继承启动器句柄，任务输出流不会拖住短暂的启动确认。
 `check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
-提交会在启动命令前失败。当前桥接已在 Codex Desktop daemon 0.169.0 上完成连通性检查；
-普通终端工具不依赖此后台桥接。
+提交会在启动命令前失败。宿主必须提供共享控制端点，仅有桌面 App Server 进程或磁盘上的
+socket 文件不能证明可连接。使用 `stdio` 通道启动的服务只接受其所属客户端的连接，
+新开聊天不会增加共享 socket。普通终端工具不依赖此后台桥接。
 
-`TERMINALHOOK_CODEX_BIN` 指定 CLI 可执行文件，默认 `codex`。
+代理依次从 `TERMINALHOOK_CODEX_BIN`、宿主的 `CODEX_APP_RUNTIME_CLI_PATH`、
+PATH 中的 `codex` 选择可执行文件。显式 `TERMINALHOOK_PROXY_COMMAND` 的优先级最高。
+宿主运行时路径会传给独立 worker，保证交付时使用相同的 CLI 选择规则。
 `TERMINALHOOK_CODEX_SOCKET` 可指定现有 daemon socket。
 运维自定义代理可通过 `TERMINALHOOK_PROXY_COMMAND` 提供 JSON 参数数组，
 代理须通过 stdio 转发现有 daemon 的 WebSocket 协议；不进行 shell 展开。
 不要将其配置成启动另一个 App Server 的命令。
+
+### 连接诊断与桌面兼容性
+
+代理失败时返回失败阶段、所选可执行文件及其来源、退出状态，以及真实 stderr 的最后 16 KiB，
+截断时会明确标记。代理运行期间持续读取 stderr，避免管道写满拖住握手或 RPC。
+失败和取消会清理代理进程树。这些是代理的诊断信息，不是后台命令的 stdout/stderr。
+交付错误还会保存在任务状态的 `delivery_error` 中。
+
+2026-11-16 的 Windows 原生验证发现，Codex Desktop 26.1111.2228.0 使用 `stdio`
+App Server（CLI 0.169.0-alpha.11.1），默认共享 socket 返回 Windows 错误 10061，
+拒绝连接。PATH CLI 与桌面内置 CLI 均无法连接。此宿主配置下，当前桥接无法执行后台任务或唤醒聊天。
+不会启动替代 daemon、将聊天恢复到另一个服务，也不会在预检失败后执行命令。
+需要选择已经运行且拥有原聊天的共享宿主，或使用普通终端工具。
+模拟 socket 测试不能证明原生桌面回调能力。
 
 ## 提交一次，等待结果交付
 

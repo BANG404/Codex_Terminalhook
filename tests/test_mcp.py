@@ -360,7 +360,7 @@ class McpTests(unittest.TestCase):
         result = self.client.result()
         self.assertEqual(result["status"], "exited_unmatched")
         self.assertEqual(result["exit_code"], 0)
-        self.assertFalse(is_alive(int(result["output_tail"]["stdout"].strip())))
+        self.assertTrue(wait_for_exit(int(result["output_tail"]["stdout"].strip())))
 
     def test_process_limit_releases_slot_after_stop(self):
         processes = []

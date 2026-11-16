@@ -140,6 +140,10 @@ def host():
 
 
 def proxy():
+    failure = Path(os.environ["TERMINALHOOK_FAKE_STATE_DIR"]) / "proxy-error"
+    if failure.exists():
+        print(failure.read_text(encoding="utf-8"), file=sys.stderr, flush=True)
+        raise SystemExit(42)
     with socket.create_connection(("127.0.0.1", int(os.environ["TERMINALHOOK_FAKE_PORT"]))) as connection:
         def write():
             try:

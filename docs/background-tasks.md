@@ -21,14 +21,39 @@ Windows workers inherit no launcher handles, so open task streams cannot delay
 the short launch acknowledgment.
 `check_background {}` checks this route without starting a model turn. A host
 without the metadata or daemon is rejected before any command starts. The
-current implementation has been probed against Codex Desktop daemon 0.169.0;
-ordinary terminal tools still work without the background bridge.
+host must expose a shared control endpoint; merely having a desktop app-server
+process or a socket file on disk does not establish availability. A server
+started with the `stdio` transport accepts its owning client's connection only.
+Opening another chat does not add a shared socket. Ordinary terminal tools still
+work without the background bridge.
 
-`TERMINALHOOK_CODEX_BIN` selects the CLI executable (default `codex`).
+The proxy executable is selected from `TERMINALHOOK_CODEX_BIN`, then the host's
+`CODEX_APP_RUNTIME_CLI_PATH`, then `codex` on PATH. An explicit
+`TERMINALHOOK_PROXY_COMMAND` takes precedence over all three. The host runtime
+path is passed to the detached worker so delivery uses the same CLI selection.
 `TERMINALHOOK_CODEX_SOCKET` selects an existing daemon socket. For an operator
 provided proxy transport, `TERMINALHOOK_PROXY_COMMAND` is a JSON argv array;
 it must speak WebSocket over stdio to the existing daemon. No shell expansion
 is performed. Do not configure a command that starts a separate app server.
+
+### Connection diagnostics and desktop compatibility
+
+Proxy failures report the failing stage, selected executable and its source,
+exit status, and the last 16 KiB of actual stderr, marked when truncated. Stderr
+is drained while the proxy runs so a full pipe cannot stall the handshake or
+RPC. Failure and cancellation clean up the proxy's process tree. These are the
+proxy's diagnostics, not the background command's stdout/stderr. Delivery errors
+are also retained in the task's saved `delivery_error` state.
+
+During native Windows verification on 2026-11-16, Codex Desktop
+26.1111.2228.0 used a `stdio` app-server (CLI 0.169.0-alpha.11.1), while the
+default shared socket refused connections with Windows error 10061. Both the
+PATH CLI and desktop CLI failed to connect. Background execution and wake-up
+cannot work in that host configuration through this bridge. No replacement
+daemon is started, no chat is resumed into a different server, and no command
+is launched when preflight fails. Select an already running shared host that
+owns the original chat, or use the ordinary terminal tools. Simulated socket
+tests do not prove native desktop callback support.
 
 ## Submit once, then wait for delivery
 

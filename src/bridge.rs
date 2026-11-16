@@ -1,67 +1,49 @@
 //! Connect only to an existing Codex daemon. Never start a second app server.
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{path::PathBuf, time::Duration};
 use tokio::{
     io::Join,
-    process::{Child, ChildStdin, ChildStdout, Command},
+    process::{ChildStdin, ChildStdout},
     time::timeout,
 };
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
 type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
+mod proxy;
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct Bridge {
     socket: Socket,
-    child: Child,
+    proxy: proxy::Proxy,
     next_id: u64,
 }
 
 impl Bridge {
     pub async fn connect() -> Result<Self, String> {
-        let executable =
-            std::env::var_os("TERMINALHOOK_CODEX_BIN").unwrap_or_else(|| "codex".into());
-        let mut command = if let Some(raw) = std::env::var_os("TERMINALHOOK_PROXY_COMMAND") {
-            let argv: Vec<String> = serde_json::from_str(&raw.to_string_lossy())
-                .map_err(|e| format!("invalid TERMINALHOOK_PROXY_COMMAND: {e}"))?;
-            let first = argv
-                .first()
-                .filter(|arg| !arg.is_empty())
-                .ok_or("TERMINALHOOK_PROXY_COMMAND must be a nonempty JSON argv array")?;
-            let mut command = Command::new(first);
-            command.args(&argv[1..]);
-            command
-        } else {
-            let mut command = Command::new(executable);
-            command.args(["app-server", "proxy"]);
-            command
-        };
-        if let Some(socket) = std::env::var_os("TERMINALHOOK_CODEX_SOCKET") {
-            command.arg("--sock").arg(socket);
-        }
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        command.creation_flags(0x08000000);
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("cannot start Codex proxy: {e}"))?;
-        let stream = tokio::io::join(child.stdout.take().unwrap(), child.stdin.take().unwrap());
+        let (mut proxy, stream) = proxy::Proxy::spawn(proxy::ProxyCommand::from_env()?).await?;
         // The control socket carries WebSocket frames, including through the raw stdio proxy.
-        let (socket, _) = timeout(
+        let handshake = timeout(
             RPC_TIMEOUT,
             tokio_tungstenite::client_async("ws://localhost/", stream),
         )
-        .await
-        .map_err(|_| "Codex proxy handshake timed out")?
-        .map_err(|e| format!("Codex proxy handshake failed: {e}"))?;
+        .await;
+        let (socket, _) = match handshake {
+            Ok(Ok(connected)) => connected,
+            Ok(Err(error)) => {
+                return Err(proxy
+                    .failure(format!("Codex proxy handshake failed: {error}"))
+                    .await);
+            }
+            Err(_) => {
+                return Err(proxy
+                    .failure("Codex proxy handshake timed out".into())
+                    .await);
+            }
+        };
         let mut bridge = Self {
             socket,
-            child,
+            proxy,
             next_id: 0,
         };
         bridge.rpc("initialize", json!({"clientInfo":{"name":"terminalhook_background","version":env!("TERMINALHOOK_VERSION")},"capabilities":{"experimentalApi":true}})).await?;
@@ -70,13 +52,17 @@ impl Bridge {
     }
 
     async fn send(&mut self, value: Value) -> Result<(), String> {
-        timeout(
+        let result = timeout(
             RPC_TIMEOUT,
             self.socket.send(Message::Text(value.to_string().into())),
         )
         .await
-        .map_err(|_| "Codex write timed out")?
-        .map_err(|e| format!("Codex write failed: {e}"))
+        .map_err(|_| "Codex write timed out".to_string())
+        .and_then(|result| result.map_err(|e| format!("Codex write failed: {e}")));
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => Err(self.proxy.failure(error).await),
+        }
     }
 
     pub async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, String> {
@@ -84,7 +70,7 @@ impl Bridge {
         let id = self.next_id;
         self.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
             .await?;
-        timeout(RPC_TIMEOUT, async {
+        let result = timeout(RPC_TIMEOUT, async {
             while let Some(message) = self.socket.next().await {
                 match message.map_err(|e| format!("Codex transport failed: {e}"))? {
                     Message::Text(text) => {
@@ -106,7 +92,11 @@ impl Bridge {
                 }
             }
             Err("Codex connection ended".into())
-        }).await.map_err(|_| format!("Codex {method} timed out"))?
+        }).await.unwrap_or_else(|_| Err(format!("Codex {method} timed out")));
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => Err(self.proxy.failure(error).await),
+        }
     }
 
     pub async fn verify_thread(&mut self, thread_id: &str) -> Result<Value, String> {
@@ -143,7 +133,10 @@ impl Bridge {
 
     pub async fn launch_worker(&mut self, path: &std::path::Path) -> Result<u32, String> {
         let environment: serde_json::Map<String, Value> = std::env::vars()
-            .filter(|(key, _)| key.starts_with("TERMINALHOOK_") || key == "CODEX_HOME")
+            .filter(|(key, _)| {
+                key.starts_with("TERMINALHOOK_")
+                    || matches!(key.as_str(), "CODEX_HOME" | "CODEX_APP_RUNTIME_CLI_PATH")
+            })
             .map(|(key, value)| (key, json!(value)))
             .collect();
         let receipt=self.rpc("command/exec",json!({
@@ -170,8 +163,7 @@ impl Bridge {
 
     pub async fn close(mut self) {
         let _ = timeout(Duration::from_secs(2), self.socket.close(None)).await;
-        let _ = self.child.kill().await;
-        let _ = timeout(Duration::from_secs(2), self.child.wait()).await;
+        let _ = self.proxy.stop().await;
     }
 }
 

@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from test_mcp import Client, EXE, ROOT, is_alive
+from test_mcp import Client, EXE, ROOT, is_alive, wait_for_exit
 
 OWNER = "01a1e361-731f-7020-8ba1-5fb700728b78"
 OTHER = "01a1e361-731f-7020-8ba1-5fb700728b79"
@@ -116,6 +116,26 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(retry["delivery"], "delivered")
         self.assertEqual(len(self.deliveries()), 1)
 
+    def test_delivery_retains_proxy_diagnostics_in_saved_state(self):
+        job = self.submit("import time; time.sleep(.7); print('saved before delivery')")
+        (self.root / "proxy-error").write_text("original host connection refused 中文", encoding="utf-8")
+        state = self.await_state(job, lambda state: state["delivery"] == "failed")
+        self.assertEqual(state["status"], "completed")
+        self.assertIn("original host connection refused 中文", state["delivery_error"])
+        self.assertRegex(state["delivery_error"], r"proxy exit status:.*42")
+        saved = json.loads((self.root / "tasks" / job["task_id"] / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["delivery_error"], state["delivery_error"])
+
+    def test_successful_proxy_continuously_drains_large_stderr(self):
+        code = "import sys,runpy; sys.stderr.buffer.write(b'x'*200000); sys.stderr.flush(); runpy.run_path(sys.argv[1],run_name='__main__')"
+        with patch.dict(os.environ, {"TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, "-u", "-c", code, str(ROOT / "tests/fake_codex_proxy.py")])}):
+            client = Client()
+        try:
+            client.send("tools/call", {"name": "check_background", "arguments": {}, "_meta": {"threadId": OWNER}}, 10)
+            self.assertEqual(client.result(25)["status"], "ready")
+        finally:
+            client.close()
+
     @unittest.skipUnless(os.name == "nt", "Windows MCP Job Object containment")
     def test_host_launch_survives_strict_mcp_job_termination(self):
         import ctypes
@@ -191,9 +211,11 @@ class BackgroundTests(unittest.TestCase):
         release.touch()
         self.await_state(job, lambda s: s["delivery"] == "failed")
         self.assertEqual(self.deliveries(), [])
+        # The failure is saved before the worker drops its delivery-owner lock.
+        self.assertTrue(wait_for_exit(job["worker_pid"], timeout=10))
         (self.root / "offline").unlink()
         result = self.call("retry_delivery", {"task_id": job["task_id"]})
-        self.assertEqual(result["delivery"], "delivered")
+        self.assertEqual(result.get("delivery"), "delivered", result)
         self.assertEqual(len(self.deliveries()), 1)
 
     def test_ambiguous_delivery_never_automatically_replays(self):
