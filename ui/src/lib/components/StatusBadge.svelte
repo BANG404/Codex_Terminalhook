@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { isFailure } from "$lib/tasks";
-  import { statusLabel, type Language } from "$lib/i18n";
-  let { value, language }: { value: string; language: Language } = $props();
+  import { statusLabel } from "$lib/labels";
+  let { value }: { value: string } = $props();
 </script>
 
 <Badge
@@ -15,5 +15,5 @@
     class="size-1.5 rounded-full bg-current"
     aria-hidden="true"
   ></span>
-  {statusLabel(value, language)}
+  {statusLabel(value)}
 </Badge>

@@ -94,10 +94,6 @@
   border-radius: 12px;
   overflow: hidden;
 }
-.header,
-.brand,
-.controls,
-.auto-control,
 .filterbar,
 .task-title,
 .task-sub,
@@ -108,63 +104,10 @@
   display: flex;
   align-items: center;
 }
-.header {
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-}
-.brand {
-  gap: 8px;
-  min-width: 0;
-}
-.brand-icon {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-h1 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.2px;
-  white-space: nowrap;
-}
-.total {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.controls {
-  gap: 10px;
-  flex-shrink: 0;
-  color: var(--muted-foreground);
-}
-#language {
-  border: 0;
-  background: transparent;
-  font-size: 11px;
-  max-width: 60px;
-  padding: 3px 0;
-  border-radius: 4px;
-}
-.control-divider {
-  height: 12px;
-  width: 1px;
-  background: var(--border);
-}
-.auto-control {
-  gap: 7px;
-  font-size: 11px;
-  cursor: pointer;
-}
 .filterbar {
   justify-content: space-between;
   gap: 10px;
-  padding: 0 12px 10px;
+  padding: 10px 12px;
 }
 [data-slot="tabs-trigger"] {
   font-size: 11px;
@@ -432,20 +375,8 @@ pre {
   body {
     padding: 4px;
   }
-  .header {
-    padding: 8px;
-    gap: 6px;
-  }
-  .controls {
-    gap: 6px;
-  }
-  .auto-control > span,
-  .control-divider,
-  .total {
-    display: none;
-  }
   .filterbar {
-    padding: 0 8px 8px;
+    padding: 8px;
     gap: 6px;
     flex-wrap: wrap;
   }
