@@ -108,21 +108,29 @@ endpoint, and its last recorded execution state does not establish completion.
 `ui://terminalhook/tasks.html` resource, served as `text/html;profile=mcp-app`.
 A compatible MCP Apps host renders a dashboard for the calling chat: task
 states, delivery state, deadline, elapsed duration, exit code, and bounded live
-or saved output. English and Simplified Chinese are available in the panel.
+or saved output. The interface uses English; task names and output retain their original text.
 
 The compact Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/)
 components: status tabs and search filter the list, an icon marks delivery,
 and Details expands task identifiers and deadlines. The default desktop panel
-is about 380 pixels tall; lists and output scroll inside it. Narrow panels stack
+is about 330 pixels tall; lists and output scroll inside it. Narrow panels stack
 the list above the output. Theme changes follow the host. Controls have keyboard
-focus and accessible names; icon actions include tooltips.
+focus and accessible names. The panel starts with filters and search, with no
+title bar, language selector, refresh switch, or refresh button.
 
-The view uses the MCP Apps initialize handshake and host-mediated `tools/call`
-for refreshes. It makes no external network requests and sends no model
-messages. Auto refresh pauses when hidden, allows only one refresh sequence at
-a time, backs off after errors, and stops on teardown. Task output is rendered
-as text. UI refresh is independent of completion delivery, so closing the panel
-does not stop tasks or cause result loss.
+After the MCP Apps initialize handshake, the view reads one initial task list
+through host-mediated `tools/call`. Later updates are triggered only by
+`ui/notifications/tool-result` callbacks: list snapshots replace the list and
+load the selected task's details; individual task results update that task
+directly. Selecting a task also reads its details on demand. There is no timed
+polling, error retry timer, or refresh on visibility changes. Echoed task results
+do not trigger further reads. Without host callbacks, the last snapshot stays
+visible; this view does not add a background worker event channel.
+
+The view makes no external network requests and sends no model messages. Task
+output is rendered as text. Callbacks are ignored after teardown. UI updates are
+independent of completion delivery, so closing the panel does not stop tasks or
+cause result loss.
 
 The host decides whether to render MCP Apps. Text-only clients can use the same
 tools and structured results. Protocol/resource tests alone do not prove a

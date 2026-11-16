@@ -27,6 +27,7 @@ export interface TaskList {
   tasks?: Task[];
   truncated?: boolean;
 }
+export type TaskUpdate = TaskList & Partial<Task>;
 export const isActive = (task: Task) =>
   ["queued", "submitted", "running"].includes(task.status);
 export const needsAttention = (task: Task) =>

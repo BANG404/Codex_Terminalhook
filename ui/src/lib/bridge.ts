@@ -1,5 +1,5 @@
 // Host-mediated MCP Apps transport. No network or model-message capability.
-import type { TaskList } from "./tasks";
+import type { TaskUpdate } from "./tasks";
 
 interface ToolResult {
   isError?: boolean;
@@ -24,7 +24,7 @@ export class HostBridge {
     }
   >();
   constructor(
-    private onTasks: (tasks: TaskList) => void,
+    private onTasks: (tasks: TaskUpdate) => void,
     private onStop: () => void,
     private onError: (message: string) => void,
   ) {
@@ -86,7 +86,7 @@ export class HostBridge {
       this.theme(message.params?.theme);
     else if (message.method === "ui/notifications/tool-result") {
       try {
-        this.onTasks(data<TaskList>(message.params));
+        this.onTasks(data<TaskUpdate>(message.params));
       } catch (error) {
         this.onError(String(error));
       }

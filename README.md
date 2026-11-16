@@ -15,7 +15,7 @@ Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS In
 - **Continue from saved output:** use `wait_output` with a process ID and cursor to consume output received since the previous result.
 - **Control interactive commands:** use pipe or PTY mode and send input with `write_input`, optionally waiting for the response in the same call.
 - **Manage process lifetime:** retain commands when needed, or stop their process trees with `stop_process`; raw output is saved to rotating logs.
-- **Run long background tasks:** use `submit_task` to wait beyond an MCP call or disconnection, then receive a result in the original chat. A bilingual MCP Apps dashboard shows task and delivery state. See [background tasks and dashboard](docs/background-tasks.md).
+- **Run long background tasks:** use `submit_task` to wait beyond an MCP call or disconnection, then receive a result in the original chat. An English MCP Apps dashboard shows task and delivery state, updating on host callbacks. See [background tasks and dashboard](docs/background-tasks.md).
 - **Integrate with Codex:** install the plugin with its `terminal-wait` skill or configure standalone MCP. Current versions use direct tool calls without lifecycle hooks.
 
 [Installation and upgrades](#installation-and-upgrades) · [Tool reference](#terminal-tools) · [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) · [Development and releases](docs/releasing.md)
