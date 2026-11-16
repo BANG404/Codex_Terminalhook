@@ -89,6 +89,9 @@ it. The plugin explicitly forwards `CODEX_HOME`, `CODEX_APP_RUNTIME_CLI_PATH`,
 `TERMINALHOOK_CODEX_BIN`, and `TERMINALHOOK_CODEX_SOCKET` from its host environment.
 Host command policy must permit worker detachment; the adapter does not change
 that policy. Desktop versions with incompatible CLI protocols fail visibly.
+On Windows, an OS-owned process job removes the core, proxy, and delegated CLI
+descendants even if Desktop forcibly terminates the adapter. Explicit worker
+breakaway remains permitted; closing the UI does not cancel a detached task.
 
 ## Submit once, then wait for delivery
 

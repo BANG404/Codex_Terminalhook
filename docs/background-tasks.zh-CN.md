@@ -69,6 +69,8 @@ Windows socket ACL 由 Codex 自行创建，适配器不放宽权限。
 `TERMINALHOOK_CODEX_BIN` 和 `TERMINALHOOK_CODEX_SOCKET`。
 宿主命令策略须允许 worker 脱离，适配器不会更改该策略。
 桌面版本的 CLI 协议不兼容时会明确失败。
+Windows 使用由操作系统管理的进程 Job；桌面强制终止适配器时，也会清理其核心、代理及
+转发 CLI 的子进程。仍允许 worker 显式脱离；关闭界面不会取消独立后台任务。
 
 ## 提交一次，等待结果交付
 
