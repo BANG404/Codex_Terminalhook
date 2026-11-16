@@ -26,6 +26,7 @@ interface Output {
 export interface TaskList {
   tasks?: Task[];
   truncated?: boolean;
+  revision?: string;
 }
 export type TaskUpdate = TaskList & Partial<Task>;
 export const isActive = (task: Task) =>

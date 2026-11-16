@@ -176,16 +176,24 @@ and Details expands task identifiers and deadlines. The default desktop panel
 is about 330 pixels tall; lists and output scroll inside it. Narrow panels stack
 the list above the output. Theme changes follow the host. Controls have keyboard
 focus and accessible names. The panel starts with filters and search, with no
-title bar, language selector, refresh switch, or refresh button.
+title bar, language selector, refresh switch, or refresh button. Selected rows use
+a background tint without a left border. Detail reads also reconcile the list
+status, so a completed detail cannot leave its row marked running.
 
 After the MCP Apps initialize handshake, the view reads one initial task list
 through host-mediated `tools/call`. Later updates are triggered only by
 `ui/notifications/tool-result` callbacks: list snapshots replace the list and
 load the selected task's details; individual task results update that task
 directly. Selecting a task also reads its details on demand. There is no timed
-polling, error retry timer, or refresh on visibility changes. Echoed task results
-do not trigger further reads. Without host callbacks, the last snapshot stays
-visible; this view does not add a background worker event channel.
+polling, error retry timer, or refresh on visibility changes. The view also keeps
+one app-only `watch_tasks` subscription pending after the last list revision.
+Native filesystem callbacks for saved task state/result changes resolve it with
+a new snapshot, then the view subscribes to the next change. Unrelated chats,
+file reads, and log writes do not produce UI updates. Registration precedes the
+snapshot read to avoid losing completion between requests. This starts no model
+turn and makes no periodic list requests. Host timeout/errors stop the subscription
+without a timed retry; a subsequent host snapshot can reconnect it. Teardown
+cancels pending requests. Hosts must support app-only tools and pending tool calls.
 
 The view makes no external network requests and sends no model messages. Task
 output is rendered as text. Callbacks are ignored after teardown. UI updates are

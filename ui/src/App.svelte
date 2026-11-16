@@ -45,6 +45,8 @@
   let stopped = false;
   let revision = 0;
   let detailRequest = 0;
+  let taskRevision = "";
+  let watching = false;
   let bridge: HostBridge;
   const standalone = window.parent === window;
   const active = $derived(tasks.filter(isActive).length);
@@ -72,6 +74,7 @@
   function accept(result: TaskList) {
     if (!Array.isArray(result.tasks)) return;
     tasks = result.tasks;
+    taskRevision = result.revision ?? "";
     truncated = !!result.truncated;
     loaded = true;
     if (!tasks.some((task) => task.task_id === selected)) {
@@ -92,6 +95,7 @@
       const result = await bridge.tool<Task>("get_task", { task_id: id });
       if (stopped || request !== detailRequest || selected !== id) return;
       detail = result;
+      tasks = tasks.map((task) => task.task_id === id ? { ...task, ...result } : task);
       now = Date.now();
       detailError = "";
     } catch (cause) {
@@ -120,10 +124,12 @@
   function receiveUpdate(update: TaskUpdate) {
     if (stopped) return;
     if (Array.isArray(update.tasks)) {
+      if (update.revision && update.revision === taskRevision) return;
       ++revision;
       accept(update);
       markUpdated();
       void loadDetail();
+      void watchTasks();
     } else if (
       typeof update.task_id === "string" &&
       typeof update.status === "string"
@@ -153,6 +159,27 @@
       markUpdated();
     }
   }
+  async function watchTasks() {
+    if (watching || !ready || stopped || !taskRevision) return;
+    watching = true;
+    try {
+      while (!stopped && ready && taskRevision) {
+        const before = revision;
+        const after = taskRevision;
+        const update = await bridge.tool<TaskList>("watch_tasks", { after_revision: after });
+        if (stopped) return;
+        if (!Array.isArray(update.tasks) || !update.revision || update.revision === after)
+          throw new Error("Invalid task event response");
+        // A host callback may have already supplied a newer snapshot.
+        if (revision === before) receiveUpdate(update);
+      }
+    } catch (cause) {
+      if (!stopped) error = String(cause);
+      // Host timeout/errors stop the subscription; no timed retry or heartbeat.
+    } finally {
+      watching = false;
+    }
+  }
   async function initialize() {
     if (!loaded) {
       // A callback can carry newer data while the initial read is in flight.
@@ -167,6 +194,7 @@
       }
     }
     await loadDetail();
+    void watchTasks();
   }
   onMount(() => {
     document.documentElement.classList.toggle(

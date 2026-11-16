@@ -126,6 +126,45 @@ class BackgroundTests(unittest.TestCase):
         saved = json.loads((self.root / "tasks" / job["task_id"] / "state.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["delivery_error"], state["delivery_error"])
 
+    def test_ui_subscription_waits_for_completion_and_returns_saved_state(self):
+        job = self.submit("import time; time.sleep(1); print('event completion')")
+        snapshot = self.call("list_tasks")
+        watcher = Client()
+        try:
+            for ident in range(20, 30):
+                watcher.send("tools/call", {"name": "watch_tasks", "arguments": {
+                    "after_revision": snapshot["revision"]}, "_meta": {"threadId": OWNER}}, ident)
+                snapshot = watcher.result(12)
+                task = next(task for task in snapshot["tasks"] if task["task_id"] == job["task_id"])
+                if task["status"] == "completed" and task["delivery"] == "delivered":
+                    self.assertEqual(task["exit_code"], 0)
+                    break
+            else:
+                self.fail("completion/delivery state did not reach the event subscriber")
+        finally:
+            watcher.close()
+
+    def test_ui_subscription_ignores_other_chat_and_is_cancelled_on_disconnect(self):
+        snapshot = self.call("list_tasks")
+        watcher = Client()
+        watcher.send("tools/call", {"name": "watch_tasks", "arguments": {
+            "after_revision": snapshot["revision"]}, "_meta": {"threadId": OWNER}}, 20)
+        directory = self.root / "tasks" / ("task_" + "f" * 32)
+        directory.mkdir(parents=True)
+        (directory / "request.json").write_text(json.dumps({"task_id": directory.name,
+            "thread_id": OTHER, "request": {"task_key": "other", "program": sys.executable,
+            "cwd": str(self.root)}}), encoding="utf-8")
+        (directory / "state.json").write_text(json.dumps({"status": "completed", "delivery": "delivered"}), encoding="utf-8")
+        try:
+            with self.assertRaises(queue.Empty):
+                watcher.receive(.3)
+        finally:
+            watcher.close()
+            (directory / "state.json").unlink()
+            (directory / "request.json").unlink()
+            directory.rmdir()
+        self.assertEqual(self.call("list_tasks")["tasks"], [])
+
     def test_successful_proxy_continuously_drains_large_stderr(self):
         code = "import sys,runpy; sys.stderr.buffer.write(b'x'*200000); sys.stderr.flush(); runpy.run_path(sys.argv[1],run_name='__main__')"
         with patch.dict(os.environ, {"TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, "-u", "-c", code, str(ROOT / "tests/fake_codex_proxy.py")])}):
