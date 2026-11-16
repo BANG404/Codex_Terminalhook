@@ -15,7 +15,7 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，支持事件驱动的终端�
 - **接续读取输出：** 使用 `wait_output`、进程 ID 和游标，读取上次返回后收到的输出。
 - **控制交互命令：** 支持管道和 PTY 模式，使用 `write_input` 发送输入，并可在同一次调用中等待响应。
 - **管理进程生命周期：** 按需保留命令，或使用 `stop_process` 停止其进程树；原始输出保存到轮转日志。
-- **执行长时间后台任务：** 使用 `submit_task` 跨越 MCP 调用或断连等待，完成后向原聊天交付结果；英文 MCP Apps 面板展示执行与交付状态，并在收到宿主回调时更新。参见[后台任务与任务面板](docs/background-tasks.zh-CN.md)。
+- **执行长时间后台任务：** 宿主具有可连接的共享 Codex daemon 时，使用 `submit_task` 跨越 MCP 调用或断连等待，完成后向原聊天交付结果；英文 MCP Apps 面板展示执行与交付状态，并在收到宿主回调时更新。仅使用 stdio 的桌面宿主无法使用此后台桥接，预检会报告真实代理错误。参见[后台任务与任务面板](docs/background-tasks.zh-CN.md)。
 - **集成 Codex：** 安装包含 `terminal-wait` 技能的插件，或配置独立 MCP。当前版本使用直接工具调用，无需生命周期 Hook。
 
 [安装与升级](#安装与升级) · [工具参考](#原有终端工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
