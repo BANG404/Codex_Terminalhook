@@ -27,7 +27,7 @@ impl TerminalHook {
         vec![
             Tool::new(
                 "run_until",
-                "Start a command and wait locally for an output regex, exit, or timeout without polling. Default: terminate on match/timeout. Use on_match=keep_running to retain a service, then wait_output/write_input with returned process_id and cursor. Pipe keeps stdout/stderr separate; mode=pty is a real terminal with merged terminal output. Supports line or bounded multiline window matching and rotating raw logs.",
+                "Start a command and await one output condition, natural exit, or timeout locally. For builds, tests, and CI/CD, wait for the final outcome in this call; do not return at started/queued/in_progress markers just to issue more waits. To await natural exit, use a specific regex the command will never emit and check exit_code. Choose a task-sized timeout (up to 600000 ms, below the client limit); do not split a long wait into repeated short calls. Default: terminate on match/timeout. Use on_match=keep_running for a service or a genuine intermediate action. Pipe separates stdout/stderr; PTY merges terminal output. Supports multiline matching and rotating logs.",
                 schemars::schema_for!(RunRequest)
                     .as_object()
                     .unwrap()
@@ -35,7 +35,7 @@ impl TerminalHook {
             ),
             Tool::new(
                 "wait_output",
-                "Wait locally for new output from a TerminalHook process after its previous cursor. Replays bounded buffered output then waits without polling. Timeout/cancellation preserves the process. Reports cursor_expired if history was evicted.",
+                "Await a later condition on a retained process after a genuine intermediate action or other useful work. Use run_until for a new command and its final outcome. This is not a status-polling tool: do not repeatedly call it after short timeouts or match successive progress messages only to keep waiting. Choose a task-sized timeout; on timeout diagnose/report before deciding recovery, rather than automatically repeating the wait. Replays buffered output after the previous cursor. Timeout/cancellation preserves the process; cursor_expired reports evicted history.",
                 schemars::schema_for!(WaitRequest)
                     .as_object()
                     .unwrap()
@@ -43,7 +43,7 @@ impl TerminalHook {
             ),
             Tool::new(
                 "write_input",
-                "Write UTF-8 input to a managed process. Optionally include wait with regex conditions; the output cursor is registered before sending to avoid missing immediate responses. Pipe EOF can be sent explicitly. PTY uses a merged terminal stream.",
+                "Write UTF-8 input to a managed process. When a response is needed, include wait to send and await it in one call, instead of writing then polling with wait_output. The cursor is registered before sending to avoid missing immediate responses. Choose a task-sized response timeout; do not automatically repeat waits or resend input on timeout. Pipe EOF can be sent explicitly. PTY merges terminal output.",
                 schemars::schema_for!(WriteRequest)
                     .as_object()
                     .unwrap()
@@ -65,7 +65,7 @@ impl ServerHandler for TerminalHook {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("terminalhook", env!("TERMINALHOOK_VERSION")))
-            .with_instructions("Await run_until or wait_output once; they wait locally without model polling. Keep process_id and cursor to continue after a match. Use write_input with wait to register before sending and avoid missing fast responses. stop_process cleans up retained commands. Set timeout_ms below the client's MCP timeout. Match does not prove successful exit. PTY merges sources into terminal. Commands use MCP OS permissions; process ids/history/temp logs live only for this connection.")
+            .with_instructions("Call these tools directly and await one result. For one-shot tasks, make run_until await the final outcome or natural exit, not startup/progress markers. Local waiting avoids model polling only within a call; repeated short waits still cause model round trips. Set a task-sized timeout up to 600000 ms below the client limit; do not use short timeouts for periodic updates. Do not automatically repeat waits after timeout: diagnose/report and decide recovery from new evidence or an explicit instruction to continue. Reserve wait_output for retained processes when a genuine intermediate action or other useful work separated the waits. Use write_input with wait for input and its response together. Keep process_id and cursor; stop_process cleans up retained commands. Match does not prove successful exit; inspect the natural exit code when success requires completion. PTY merges sources into terminal. Commands use MCP OS permissions; process ids/history/temp logs live only for this connection.")
     }
 
     async fn list_tools(
