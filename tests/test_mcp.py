@@ -416,7 +416,7 @@ class McpTests(unittest.TestCase):
     def test_discovery(self):
         self.client.send("tools/list", {}, 2)
         tools = self.client.receive()["result"]["tools"]
-        self.assertEqual({t["name"] for t in tools}, {"run_until", "wait_output", "write_input", "stop_process"})
+        self.assertEqual({t["name"] for t in tools}, {"run_until", "wait_output", "write_input", "stop_process", "submit_task", "get_task", "cancel_task", "retry_delivery", "check_background", "list_tasks"})
         self.assertIn("until", tools[0]["inputSchema"]["required"])
 
     def test_no_intermediate_response_and_concurrent_ping(self):

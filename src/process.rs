@@ -77,8 +77,22 @@ impl Manager {
             .ok_or_else(|| "unknown or expired process_id in this connection".into())
     }
     pub async fn run(&self, input: RunRequest, ct: CancellationToken) -> Result<Value, String> {
+        spec::validate_wait(&input.wait, input.mode)?;
+        let duration = Some(Duration::from_millis(input.wait.timeout_ms));
+        self.run_with_deadline(input, ct, duration).await
+    }
+    pub async fn run_with_deadline(
+        &self,
+        input: RunRequest,
+        ct: CancellationToken,
+        duration: Option<Duration>,
+    ) -> Result<Value, String> {
         spec::validate_run(&input)?;
-        let rules = spec::validate_wait(&input.wait, input.mode)?;
+        let rules = if input.wait.until.is_empty() {
+            Vec::new()
+        } else {
+            spec::validate_rules(&input.wait, input.mode)?
+        };
         let permit = self
             .0
             .slots
@@ -148,7 +162,7 @@ impl Manager {
                 let _ = tokio::fs::remove_dir_all(path).await;
             }
         }
-        let waited = wait_for(&session, 0, &input.wait, &rules, ct).await;
+        let waited = wait_for_deadline(&session, 0, &input.wait, &rules, ct, duration).await;
         match waited {
             Ok(mut value) => {
                 let terminate = match value["status"].as_str() {
@@ -318,14 +332,38 @@ fn refresh(s: &Session, value: &mut Value) {
 
 async fn wait_for(
     session: &Session,
-    mut cursor: u64,
+    cursor: u64,
     spec: &WaitSpec,
     rules: &[Rule],
     ct: CancellationToken,
 ) -> Result<Value, String> {
+    wait_for_deadline(
+        session,
+        cursor,
+        spec,
+        rules,
+        ct,
+        Some(Duration::from_millis(spec.timeout_ms)),
+    )
+    .await
+}
+
+async fn wait_for_deadline(
+    session: &Session,
+    mut cursor: u64,
+    spec: &WaitSpec,
+    rules: &[Rule],
+    ct: CancellationToken,
+    duration: Option<Duration>,
+) -> Result<Value, String> {
     let started = Instant::now();
     let mut changes = session.changed.subscribe();
-    let deadline = sleep(Duration::from_millis(spec.timeout_ms));
+    let deadline = async {
+        match duration {
+            Some(duration) => sleep(duration).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
     tokio::pin!(deadline);
     let mut matchers: [MatchBuffer; 3] = Default::default();
     loop {

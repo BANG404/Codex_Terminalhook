@@ -148,6 +148,24 @@ CI 固定 Codex CLI 0.167.0，在每个目标上通过回环 Git 服务验证本
 发布使用 GitHub 工作流令牌，不需要 PAT 或外部 runner。工具直接暴露及桌面行为仍须在实际 App 验证。
 默认包不含生命周期 Hook；历史 0.3.1 实现保留在 `legacy/stop-hook`。
 
+## 任务面板验证
+
+Alpha 的 Linux x64 测试任务还会使用 Playwright，连接真实 TerminalHook stdio 服务
+与确定性宿主夹具，验证内嵌 MCP Apps 资源、任务工具、语言切换、输出转义，
+以及无外部请求、无界面模型消息。这些检查纳入 `Quality checks`；
+桌面宿主原生渲染仍需单独集成验证。Node 20+ 和锁定的 Playwright 开发依赖
+仅用于浏览器验证，安装后的 MCP 二进制不需要它们。先执行 `cargo build`，再运行：
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:ui
+```
+
+截图和证据写入已忽略的 `artifacts/`，并由 CI 上传。
+后台执行与宿主交付回归纳入所有原生平台的 Python 协议测试。
+参见[后台任务指南](background-tasks.zh-CN.md)。
+
 ## 本地构建
 
 在目标系统/架构安装 Python 3.11+ 和固定版本 Rust 工具链后执行：

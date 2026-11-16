@@ -5,7 +5,7 @@ description: Run commands and await final results, service readiness, or interac
 
 Use `run_until` to launch a command with `program`, argument array, absolute `cwd`, and named `until` rules. Choose the condition that fulfills the user's task before starting. Await one result; output matching happens locally. Repeated short waits still create model round trips, even when each call waits locally.
 
-Call `mcp__terminalhook` tools directly and await the result once. Do not wrap long waits in `functions.exec`: its yield behavior can introduce repeated model-driven waits. The installer adds `mcp__terminalhook` to `[features.code_mode].direct_only_tool_namespaces` in user config; a fresh chat loads the new tools. If this namespace is unavailable as a native direct call, report that the direct-call configuration has not loaded; do not silently switch to repeated wrapper waits. This version has no lifecycle hooks or background submission flow. For completion by natural exit, use a specific marker the command will never emit and check the returned exit code.
+Call `mcp__terminalhook` tools directly and await the result once. Do not wrap long waits in `functions.exec`: its yield behavior can introduce repeated model-driven waits. The installer adds `mcp__terminalhook` to `[features.code_mode].direct_only_tool_namespaces` in user config; a fresh chat loads the new tools. If this namespace is unavailable as a native direct call, report that the direct-call configuration has not loaded; do not silently switch to repeated wrapper waits. This version has no lifecycle hooks. For explicitly requested work that must outlive a tool call, use the independent background submission flow below. For completion by natural exit, use a specific marker the command will never emit and check the returned exit code.
 
 ## Choose the wait boundary
 
@@ -14,6 +14,12 @@ Call `mcp__terminalhook` tools directly and await the result once. Do not wrap l
 - **Input and response:** use `write_input` with `wait` when you need the response. It registers the cursor before sending, then waits in the same call. Avoid a separate send followed by repeated output checks.
 
 For example, a CI delivery command that prints a PR URL before merging should normally be awaited through natural exit in the initial call. A development server's ready URL is an appropriate early return when browser checks follow. Intermediate markers are useful only when the next action needs them or the user explicitly requested those milestones.
+
+## Background tasks and dashboard
+
+Use `check_background` before first background submission. The host must provide `threadId` request metadata and an existing shared Codex daemon. `submit_task` takes a stable per-chat `task_key`, program/args, absolute `cwd`, optional output conditions, and optional `timeout_ms`. Omit/null the deadline for no execution time limit; omit/empty `until` for natural exit. It returns immediately and owns execution outside the MCP connection. End the turn after submission and await the host-delivered result. Do not poll `get_task` or repeatedly submit tasks. Identical task keys return the existing task; changed arguments are rejected.
+
+`list_tasks` opens the embedded MCP Apps dashboard in compatible hosts. The panel refreshes through tools without model messages. `get_task` inspects liveness, output tails, the persisted result, and delivery receipt. `cancel_task` explicitly cancels a task. `retry_delivery` retries only saved results that failed before submission and never reexecutes the command; `uncertain`/`sending` delivery requires inspection of the original chat before any manual recovery. Ordinary terminal tools keep their original connection-bound process lifetime. Background state survives MCP disconnection; command execution is not restored after OS/worker failure. Waiting uses the worker, and delivery uses `codex app-server proxy` to the existing daemon; never start a second app server or use `codex exec` to recover status.
 
 ## Timeouts and recovery
 
@@ -35,4 +41,4 @@ Treat a timeout as a recovery boundary. Inspect the returned status, output tail
 - Rules use Rust regex syntax, without lookaround, backreferences or zero-width matches. The tool limits output returned to the model and reports any match/capture truncation explicitly.
 - Results include status, natural exit code when observed, output tails, and a rotating raw `log_dir`. Set an absolute `log_dir` in `run_until` if logs must survive the connection; default logs are temporary.
 
-Only commands launched by this MCP connection are managed. It cannot attach to Codex built-in terminal sessions or resume processes after reconnection. Commands execute with local MCP OS permissions; normal tool approval remains applicable. Closing the connection cleans up its active processes.
+The ordinary terminal tools manage only commands launched by their MCP connection. It cannot attach to Codex built-in terminal sessions or resume processes after reconnection. Commands execute with local MCP OS permissions; normal tool approval remains applicable. Closing the connection cleans up its ordinary terminal processes; explicitly submitted background tasks remain independently owned by their workers.
