@@ -62,7 +62,7 @@ pwsh -NoProfile -File scripts/package.ps1
 pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 ```
 
-On Linux/macOS, build with `python3 scripts/package.py --channel development`, then install with `sh scripts/install.sh --source ./dist/package`. Native source builds require the pinned Rust toolchain and Python 3.11+. Linux binaries use glibc (built on Ubuntu 24.04); Alpine/musl and Windows ARM64 are not release targets. macOS artifacts are unsigned and not notarized.
+On Linux/macOS, build with `python3 scripts/package.py --channel development`, then install with `sh scripts/install.sh --source ./dist/package`. Native source builds require the pinned Rust toolchain, Python 3.11+, and Node.js 20.19+ or 22.12+ with npm to bundle the Svelte dashboard. Linux binaries use glibc (built on Ubuntu 24.04); Alpine/musl and Windows ARM64 are not release targets. macOS artifacts are unsigned and not notarized.
 
 `package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. Local installations require the directory to stay available and the installer to be rerun after local changes; they do not download remote updates. In both modes, the installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands and Codex's configuration editing interface to preserve existing settings and add `mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces`. This administration does not send model requests.
 
@@ -269,6 +269,9 @@ invocation, updates, and verification.
 ## Verification
 
 ```powershell
+npm ci
+npm run check:ui
+npm run build:ui
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo build --locked

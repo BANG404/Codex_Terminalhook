@@ -188,15 +188,18 @@ is preserved on `legacy/stop-hook`.
 
 The Linux x64 alpha test job also runs the embedded MCP Apps dashboard in
 Playwright against the real TerminalHook stdio server and a deterministic host
-fixture. It verifies the resource, task tools, language switching, escaped
-output, and absence of external requests or UI model messages. These checks
+fixture. It verifies the resource, task tools, language switching, filtering,
+compact responsive layout, host themes, escaped output, and absence of external requests or UI model messages. These checks
 contribute to `Quality checks`; native desktop rendering remains a separate
-host integration check. Node 20+ and the locked Playwright development
-packages are needed only for browser verification, not for the installed MCP
-binary. Run locally after `cargo build`:
+host integration check. Node.js 20.19+ or 22.12+ and npm are needed for source
+builds; Playwright is used only for verification. The installed MCP binary needs
+neither. Before Cargo commands, build the self-contained Svelte/Tailwind bundle:
 
 ```sh
 npm ci
+npm run check:ui
+npm run build:ui
+cargo build --locked
 npx playwright install chromium
 npm run test:ui
 ```
@@ -205,9 +208,17 @@ Screenshots and evidence are written under ignored `artifacts/` and uploaded by
 CI. Background execution/host-delivery regressions run in the ordinary Python
 protocol suite on every native platform. See [background tasks](background-tasks.md).
 
+Edit `ui/src/`; `components.json` configures the checked-in shadcn-svelte
+components. `npm run dev:ui` previews layout locally (task data requires an MCP
+Apps host). `npm run build:ui` writes ignored `ui/dist/index.html`, with all
+scripts, styles, and icons inline. Cargo embeds this file; rebuild it after UI
+changes and before compiling Rust. Packaging runs `npm ci`, type checks, and
+bundling automatically. No CDN or frontend runtime is needed after installation.
+
 ## Local build
 
-Build on the target OS/architecture with Python 3.11+ and the pinned Rust toolchain:
+Build on the target OS/architecture with Python 3.11+, the pinned Rust toolchain,
+and Node.js 20.19+ or 22.12+ with npm:
 
 ```sh
 python3 scripts/package.py --channel development

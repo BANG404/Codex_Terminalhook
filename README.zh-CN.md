@@ -62,7 +62,7 @@ pwsh -NoProfile -File scripts/package.ps1
 pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 ```
 
-Linux/macOS 使用 `python3 scripts/package.py --channel development` 构建，再执行 `sh scripts/install.sh --source ./dist/package` 安装。原生源码构建需要固定版本的 Rust 工具链及 Python 3.11+。Linux 二进制使用 glibc（基于 Ubuntu 24.04 构建）；Alpine/musl 和 Windows ARM64 暂不作为发布目标。macOS 产物未签名，也未公证。
+Linux/macOS 使用 `python3 scripts/package.py --channel development` 构建，再执行 `sh scripts/install.sh --source ./dist/package` 安装。原生源码构建需要固定版本的 Rust 工具链、Python 3.11+，以及带 npm 的 Node.js 20.19+ 或 22.12+，用于打包 Svelte 面板。Linux 二进制使用 glibc（基于 Ubuntu 24.04 构建）；Alpine/musl 和 Windows ARM64 暂不作为发布目标。macOS 产物未签名，也未公证。
 
 `package.ps1` 生成 ZIP 及 `dist/SHA256SUMS.txt`。本地安装需要保留目录，文件变化后重新执行安装器，不下载远端更新。两种模式均使用标准 `codex plugin marketplace add`、`codex plugin add` 命令及 Codex 配置编辑接口，保留已有设置，并将 `mcp__terminalhook` 加入 `features.code_mode.direct_only_tool_namespaces`。此管理过程不发起模型请求。
 
@@ -261,6 +261,9 @@ Write-Output ('ACK:' + $line)
 ## 验证
 
 ```powershell
+npm ci
+npm run check:ui
+npm run build:ui
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo build --locked
