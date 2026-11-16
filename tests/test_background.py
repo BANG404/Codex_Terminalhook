@@ -228,8 +228,8 @@ class BackgroundTests(unittest.TestCase):
         resource = self.client.receive()["result"]["contents"][0]
         self.assertEqual(resource["mimeType"], "text/html;profile=mcp-app")
         self.assertIn("ui/initialize", resource["text"])
-        self.assertNotIn("https://", resource["text"])
-        self.assertIn("textContent", resource["text"])
+        self.assertNotRegex(resource["text"], r'<script[^>]+src=')
+        self.assertNotRegex(resource["text"], r'<link[^>]+rel=["\x27]stylesheet')
         self.assertEqual(self.call("list_tasks")["tasks"], [])
         job = self.submit("import time; print('live output'); time.sleep(.8)")
         listed = self.call("list_tasks")["tasks"]

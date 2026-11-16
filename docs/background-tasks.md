@@ -110,6 +110,13 @@ A compatible MCP Apps host renders a dashboard for the calling chat: task
 states, delivery state, deadline, elapsed duration, exit code, and bounded live
 or saved output. English and Simplified Chinese are available in the panel.
 
+The compact Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/)
+components: status tabs and search filter the list, an icon marks delivery,
+and Details expands task identifiers and deadlines. The default desktop panel
+is about 380 pixels tall; lists and output scroll inside it. Narrow panels stack
+the list above the output. Theme changes follow the host. Controls have keyboard
+focus and accessible names; icon actions include tooltips.
+
 The view uses the MCP Apps initialize handshake and host-mediated `tools/call`
 for refreshes. It makes no external network requests and sends no model
 messages. Auto refresh pauses when hidden, allows only one refresh sequence at

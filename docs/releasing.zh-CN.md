@@ -151,13 +151,16 @@ CI 固定 Codex CLI 0.167.0，在每个目标上通过回环 Git 服务验证本
 ## 任务面板验证
 
 Alpha 的 Linux x64 测试任务还会使用 Playwright，连接真实 TerminalHook stdio 服务
-与确定性宿主夹具，验证内嵌 MCP Apps 资源、任务工具、语言切换、输出转义，
+与确定性宿主夹具，验证内嵌 MCP Apps 资源、任务工具、语言切换、筛选、紧凑响应式布局、宿主主题、输出转义，
 以及无外部请求、无界面模型消息。这些检查纳入 `Quality checks`；
-桌面宿主原生渲染仍需单独集成验证。Node 20+ 和锁定的 Playwright 开发依赖
-仅用于浏览器验证，安装后的 MCP 二进制不需要它们。先执行 `cargo build`，再运行：
+桌面宿主原生渲染仍需单独集成验证。源码构建需要带 npm 的 Node.js 20.19+ 或 22.12+；
+Playwright 仅用于验证。安装后的 MCP 二进制均不需要。运行 Cargo 前先构建独立的 Svelte/Tailwind 资源：
 
 ```sh
 npm ci
+npm run check:ui
+npm run build:ui
+cargo build --locked
 npx playwright install chromium
 npm run test:ui
 ```
@@ -166,9 +169,15 @@ npm run test:ui
 后台执行与宿主交付回归纳入所有原生平台的 Python 协议测试。
 参见[后台任务指南](background-tasks.zh-CN.md)。
 
+界面源码位于 `ui/src/`，`components.json` 配置仓库中的 shadcn-svelte 组件。
+`npm run dev:ui` 可本地预览布局（任务数据需要 MCP Apps 宿主）。
+`npm run build:ui` 生成已忽略的 `ui/dist/index.html`，脚本、样式、图标均内联。
+Cargo 将该文件嵌入二进制，修改界面后应先重新打包，再编译 Rust。
+打包脚本会自动执行 `npm ci`、类型检查和界面构建。安装后无需 CDN 或前端运行时。
+
 ## 本地构建
 
-在目标系统/架构安装 Python 3.11+ 和固定版本 Rust 工具链后执行：
+在目标系统/架构安装 Python 3.11+、固定版本 Rust 工具链，以及带 npm 的 Node.js 20.19+ 或 22.12+ 后执行：
 
 ```sh
 python3 scripts/package.py --channel development

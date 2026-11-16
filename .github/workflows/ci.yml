@@ -91,6 +91,11 @@ jobs:
           python-version: '3.13'
       - name: Verify native host identity
         run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
+      - name: Build embedded dashboard
+        run: |
+          npm ci
+          npm run check:ui
+          npm run build:ui
       - name: Check Rust formatting
         run: cargo fmt --check
       - name: Check Rust lints
@@ -104,7 +109,6 @@ jobs:
       - name: Install dashboard browser test dependencies
         if: matrix.platform == 'linux-x64'
         run: |
-          npm ci
           npx playwright install --with-deps chromium
       - name: Verify dashboard through real MCP tools
         if: matrix.platform == 'linux-x64'
