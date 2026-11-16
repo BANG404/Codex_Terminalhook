@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import select
 import shutil
 import subprocess
 import sys
@@ -99,6 +100,23 @@ def is_alive(pid):
         return True
     except ProcessLookupError:
         return False
+
+
+def wait_for_exit(pid, timeout=2):
+    """Wait for actual kernel exit, including an exited process awaiting reaping."""
+    if sys.platform == "linux" and hasattr(os, "pidfd_open"):
+        try:
+            descriptor = os.pidfd_open(pid)
+        except ProcessLookupError:
+            return True
+        try:
+            return bool(select.select([descriptor], [], [], timeout)[0])
+        finally:
+            os.close(descriptor)
+    deadline = time.monotonic() + timeout
+    while is_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return not is_alive(pid)
 
 
 class McpTests(unittest.TestCase):
@@ -461,7 +479,15 @@ class McpTests(unittest.TestCase):
         result = self.client.result()
         self.assertEqual(result["status"], "timeout")
         self.assertFalse(is_alive(result["os_pid"]))
-        self.assertFalse(is_alive(int(result["output_tail"]["stdout"].strip())))
+        self.assertTrue(wait_for_exit(int(result["output_tail"]["stdout"].strip())))
+
+    @unittest.skipUnless(sys.platform == "linux" and hasattr(os, "pidfd_open"), "Linux process exit events")
+    def test_exit_event_observes_terminated_process_before_reaping(self):
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        try:
+            self.assertTrue(wait_for_exit(child.pid))
+        finally:
+            self.assertEqual(child.wait(timeout=2), 0)
 
     def test_keep_running_drains_and_stop(self):
         self.client.run("import os,time; os.write(1,b'READY\\n'); time.sleep(.1); [os.write(1,b'x'*4096) for _ in range(1024)]; time.sleep(120)", on_match="keep_running")
