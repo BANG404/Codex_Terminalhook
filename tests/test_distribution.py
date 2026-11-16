@@ -43,12 +43,17 @@ class DistributionTests(unittest.TestCase):
                 self.assertEqual(binary.read_bytes(), files[binary.relative_to(directory).as_posix()])
                 if os.name != "nt" and not target.startswith("windows"):
                     self.assertTrue(os.access(binary, os.X_OK))
+                adapter = binary.with_name(dist.desktop_host_binary_name(target))
+                self.assertEqual(adapter.read_bytes(), files[adapter.relative_to(directory).as_posix()])
+                if os.name != "nt" and not target.startswith("windows"):
+                    self.assertTrue(os.access(adapter, os.X_OK))
 
     def test_bad_binary_platform_or_launch_route_is_rejected(self):
         for target in dist.PLATFORMS:
             for name, data in (("platform.json", b'{"platform":"invalid"}'),
                                ("plugins/terminalhook/.mcp.json", b'{}'),
-                               ("plugins/terminalhook/bin/" + dist.binary_name(target), b"wrong binary")):
+                               ("plugins/terminalhook/bin/" + dist.binary_name(target), b"wrong binary"),
+                               ("plugins/terminalhook/bin/" + dist.desktop_host_binary_name(target), b"wrong adapter")):
                 files = dict(package_data(self.info, target), **{name: data})
                 with self.subTest(target=target, name=name), self.assertRaises(ValueError):
                     dist.package_files(archive_data(files), self.info, target)

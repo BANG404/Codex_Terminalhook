@@ -41,6 +41,35 @@ App Server（CLI 0.169.0-alpha.11.1），默认共享 socket 返回 Windows 错�
 需要选择已经运行且拥有原聊天的共享宿主，或使用普通终端工具。
 模拟 socket 测试不能证明原生桌面回调能力。
 
+### 可选的 Windows 桌面共享宿主
+
+安装包包含 `terminalhook-desktop-host.exe` 和 `Start-DesktopSharedHost.ps1`。
+关闭桌面应用后，在解压的安装包中使用 PowerShell 7 启动：
+
+```powershell
+pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1
+```
+
+启动器通过进程内的 `CODEX_CLI_PATH` 覆盖使用已安装的桌面 CLI，
+启动一个由桌面拥有、带私有 Unix socket 的核心服务，通过原生 proxy 转发桌面的 JSONL，
+并将同一 socket 与原生 CLI 路径传给插件和独立 worker。
+不会将现有 stdio 聊天接到另一个服务，预检仍不会启动服务。
+已有聊天需要在该桌面会话中重新打开。启动策略读取、CLI 子命令和版本检查原样转发。
+普通启动模式发现桌面应用仍在运行时会拒绝启动，保留现有进程。
+不修改持久环境变量、登录、审批、沙箱或插件设置。正常打开桌面应用即可回到默认传输。
+活动会话不能在不重启桌面的情况下迁移。
+
+源码检出目录应先构建两个二进制，并通过 `-HostAdapterPath` 指向
+`target/debug/terminalhook-desktop-host.exe`；`-DesktopPath` 可指定桌面程序。
+接入测试可传入独立的 `-CodexHome` 与 `-IsolatedUiProfile`，启动器不创建或复制凭据。
+每个 socket 仅允许一个适配器拥有。持续读取核心与代理 stderr，失败时返回有界摘要；
+stdout 仅输出协议 JSON。短连接客户端关闭输入后，先转发待返回响应，再关闭连接。
+Windows socket ACL 由 Codex 自行创建，适配器不放宽权限。
+插件显式转发宿主环境中的 `CODEX_HOME`、`CODEX_APP_RUNTIME_CLI_PATH`、
+`TERMINALHOOK_CODEX_BIN` 和 `TERMINALHOOK_CODEX_SOCKET`。
+宿主命令策略须允许 worker 脱离，适配器不会更改该策略。
+桌面版本的 CLI 协议不兼容时会明确失败。
+
 ## 提交一次，等待结果交付
 
 Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径：

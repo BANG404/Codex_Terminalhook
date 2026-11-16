@@ -4,6 +4,7 @@
       "command": "cmd.exe",
       "args": ["/d", "/c", "bin\\terminalhook.exe"],
       "cwd": ".",
+      "env_vars": ["CODEX_HOME", "CODEX_APP_RUNTIME_CLI_PATH", "TERMINALHOOK_CODEX_BIN", "TERMINALHOOK_CODEX_SOCKET"],
       "startup_timeout_sec": 10,
       "tool_timeout_sec": 660
     }

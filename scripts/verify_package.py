@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 
-from distribution import archive_name, binary_name, extract_package, host_platform, mcp_config
+from distribution import archive_name, binary_name, desktop_host_binary_name, extract_package, host_platform, mcp_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,6 +40,10 @@ def main():
         assert digest(binary) == digest(ROOT / "target/release" / binary_name(target))
         assert os.access(binary, os.X_OK), "Extracted native binary is not executable"
         assert subprocess.check_output([str(binary), "--version"], text=True).strip() == "terminalhook " + manifest["version"]
+        desktop_host = plugin / "bin" / desktop_host_binary_name(target)
+        assert digest(desktop_host) == digest(ROOT / "target/release" / desktop_host_binary_name(target))
+        assert os.access(desktop_host, os.X_OK)
+        assert subprocess.check_output([str(desktop_host), "--host-version"], text=True).strip() == "terminalhook-desktop-host " + manifest["version"]
         environment = os.environ.copy()
         environment.update(TERMINALHOOK_EXE=str(binary),
                            TERMINALHOOK_UTF8_INIT=str(plugin / "skills/terminal-wait/scripts/Initialize-Utf8.ps1"),
