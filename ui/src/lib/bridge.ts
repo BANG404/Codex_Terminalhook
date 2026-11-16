@@ -1,6 +1,8 @@
 // Host-mediated MCP Apps transport. No network or model-message capability.
 import type { TaskUpdate } from "./tasks";
 
+export class HostResponseTimeout extends Error {}
+
 interface ToolResult {
   isError?: boolean;
   structuredContent?: unknown;
@@ -40,7 +42,7 @@ export class HostBridge {
       const timer = setTimeout(() => {
         this.post({ method: "notifications/cancelled", params: { requestId: id, reason: "Host response timed out" } });
         this.pending.delete(id);
-        reject(new Error("Host response timed out"));
+        reject(new HostResponseTimeout("Host response timed out"));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.post({ id, method, params });
@@ -86,6 +88,8 @@ export class HostBridge {
     } else if (message.method === "ui/notifications/host-context-changed")
       this.theme(message.params?.theme);
     else if (message.method === "ui/notifications/tool-result") {
+      // Some hosts echo cancelled app requests. Transport renewal is silent.
+      if (message.params?.isError && message.params?.structuredContent?.message === "Task event subscription cancelled") return;
       try {
         this.onTasks(data<TaskUpdate>(message.params));
       } catch (error) {

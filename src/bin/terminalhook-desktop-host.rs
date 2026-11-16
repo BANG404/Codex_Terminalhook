@@ -25,6 +25,47 @@ type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const STDERR_LIMIT: usize = 16384;
 
+#[cfg(windows)]
+fn own_native_children() -> std::io::Result<()> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::{
+            JobObjects::{
+                AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+                JobObjectExtendedLimitInformation, SetInformationJobObject,
+            },
+            Threading::GetCurrentProcess,
+        },
+    };
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &limits as *const _ as *const _,
+            std::mem::size_of_val(&limits) as u32,
+        ) == 0
+            || AssignProcessToJobObject(job, GetCurrentProcess()) == 0
+        {
+            let error = std::io::Error::last_os_error();
+            CloseHandle(job);
+            return Err(error);
+        }
+        // Assign this adapter before spawning anything. Retain the unnamed,
+        // non-inheritable handle until OS process teardown, rather than Rust
+        // Drop: Desktop may use TerminateProcess. Core/proxy/delegated CLI
+        // descendants die with the adapter; explicit detached workers may escape.
+    }
+    Ok(())
+}
+
 struct CapturedStderr {
     tail: Arc<Mutex<Vec<u8>>>,
     task: JoinHandle<()>,
@@ -320,6 +361,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if program.canonicalize()? == std::env::current_exe()?.canonicalize()? {
         return Err("Desktop host cannot delegate to itself".into());
     }
+    #[cfg(windows)]
+    own_native_children()
+        .map_err(|error| format!("Cannot establish Desktop CLI process ownership: {error}"))?;
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     if !is_server(&args) {
         let mut command = std::process::Command::new(program);

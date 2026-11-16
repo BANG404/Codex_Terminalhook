@@ -89,6 +89,9 @@ it. The plugin explicitly forwards `CODEX_HOME`, `CODEX_APP_RUNTIME_CLI_PATH`,
 `TERMINALHOOK_CODEX_BIN`, and `TERMINALHOOK_CODEX_SOCKET` from its host environment.
 Host command policy must permit worker detachment; the adapter does not change
 that policy. Desktop versions with incompatible CLI protocols fail visibly.
+On Windows, an OS-owned process job removes the core, proxy, and delegated CLI
+descendants even if Desktop forcibly terminates the adapter. Explicit worker
+breakaway remains permitted; closing the UI does not cancel a detached task.
 
 ## Submit once, then wait for delivery
 
@@ -191,8 +194,10 @@ Native filesystem callbacks for saved task state/result changes resolve it with
 a new snapshot, then the view subscribes to the next change. Unrelated chats,
 file reads, and log writes do not produce UI updates. Registration precedes the
 snapshot read to avoid losing completion between requests. This starts no model
-turn and makes no periodic list requests. Host timeout/errors stop the subscription
-without a timed retry; a subsequent host snapshot can reconnect it. Teardown
+turn and makes no periodic list requests. A transport deadline callback silently
+renews the subscription without refreshing the view, so idle panels can still
+receive later completion events. Other errors stop the subscription without a
+timed retry; a subsequent host snapshot can reconnect it. Teardown
 cancels pending requests. Hosts must support app-only tools and pending tool calls.
 
 The view makes no external network requests and sends no model messages. Task

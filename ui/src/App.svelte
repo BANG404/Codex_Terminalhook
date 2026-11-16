@@ -17,7 +17,7 @@
   import * as Tabs from "$lib/components/ui/tabs";
   import * as Collapsible from "$lib/components/ui/collapsible";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
-  import { HostBridge } from "$lib/bridge";
+  import { HostBridge, HostResponseTimeout } from "$lib/bridge";
   import {
     isActive,
     needsAttention,
@@ -166,7 +166,15 @@
       while (!stopped && ready && taskRevision) {
         const before = revision;
         const after = taskRevision;
-        const update = await bridge.tool<TaskList>("watch_tasks", { after_revision: after });
+        let update: TaskList;
+        try {
+          update = await bridge.tool<TaskList>("watch_tasks", { after_revision: after });
+        } catch (cause) {
+          // Renew a bounded transport subscription from its timeout callback.
+          // This does not refresh data or start a separate polling/retry timer.
+          if (!stopped && cause instanceof HostResponseTimeout) continue;
+          throw cause;
+        }
         if (stopped) return;
         if (!Array.isArray(update.tasks) || !update.revision || update.revision === after)
           throw new Error("Invalid task event response");
@@ -175,7 +183,7 @@
       }
     } catch (cause) {
       if (!stopped) error = String(cause);
-      // Host timeout/errors stop the subscription; no timed retry or heartbeat.
+      // Other errors stop the subscription; no timed retry or heartbeat.
     } finally {
       watching = false;
     }
