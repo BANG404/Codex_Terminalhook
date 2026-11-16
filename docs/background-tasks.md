@@ -55,6 +55,41 @@ is launched when preflight fails. Select an already running shared host that
 owns the original chat, or use the ordinary terminal tools. Simulated socket
 tests do not prove native desktop callback support.
 
+### Opt-in Windows Desktop shared host
+
+The package includes `terminalhook-desktop-host.exe` and
+`Start-DesktopSharedHost.ps1`. Close Desktop, then launch it from an extracted
+package with PowerShell 7:
+
+```powershell
+pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1
+```
+
+The launcher uses the installed Desktop CLI through a process-local
+`CODEX_CLI_PATH` override. It starts one Desktop-owned core with a private Unix
+socket, relays Desktop's JSONL connection through the native proxy, and passes
+that same socket and native CLI to the plugin and detached worker. It does not
+attach an existing stdio chat to a different server. Preflight still never starts
+a server. Existing chats must be reopened in this Desktop session before use.
+Startup policy reads, CLI subcommands, and version checks delegate unchanged.
+The launcher leaves a running Desktop untouched and refuses a normal launch
+until it is closed. It changes no persistent environment, login, approval,
+sandbox, or plugin settings. Start Desktop normally to return to its default
+transport. An active session cannot be migrated without restarting Desktop.
+
+For a source checkout, build both binaries and supply `-HostAdapterPath` pointing
+to `target/debug/terminalhook-desktop-host.exe`. `-DesktopPath` overrides the
+installed app executable. Acceptance testing can supply a separate `-CodexHome`
+and `-IsolatedUiProfile`; the launcher does not create or copy credentials.
+Only one adapter may own each socket. Core/proxy stderr is drained continuously
+and failures include its bounded tail; the adapter sends only protocol JSON to
+stdout. Pending responses are drained when a short-lived client closes stdin.
+The socket's Windows ACL is created by Codex itself; the adapter does not relax
+it. The plugin explicitly forwards `CODEX_HOME`, `CODEX_APP_RUNTIME_CLI_PATH`,
+`TERMINALHOOK_CODEX_BIN`, and `TERMINALHOOK_CODEX_SOCKET` from its host environment.
+Host command policy must permit worker detachment; the adapter does not change
+that policy. Desktop versions with incompatible CLI protocols fail visibly.
+
 ## Submit once, then wait for delivery
 
 Example `submit_task` arguments on Unix (use native paths and programs on Windows):
