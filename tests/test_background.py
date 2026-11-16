@@ -155,6 +155,25 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(count.read_text(), "one")
         self.assertEqual(len(self.deliveries()), 1)
 
+    @unittest.skipUnless(os.name == "nt", "Windows atomic replacement sharing")
+    def test_state_replacement_waits_for_temporary_reader(self):
+        release = self.root / "release-task"
+        job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('reader released')")
+        self.await_state(job, lambda s: s["status"] == "running" and s.get("worker_live"))
+        # CRT readers do not grant FILE_SHARE_DELETE. Hold one across completion
+        # so the first atomic replacement really fails, then release it locally.
+        reader = (self.root / "tasks" / job["task_id"] / "state.json").open("r")
+        release.touch()
+        timer = threading.Timer(.2, reader.close)
+        timer.start()
+        try:
+            state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+            self.assertEqual(state["status"], "completed")
+            self.assertEqual(state["result"]["exit_code"], 0)
+        finally:
+            timer.join()
+            reader.close()
+
     def test_missing_host_context_and_unavailable_host_do_not_launch(self):
         missing = self.call("submit_task", {}, owner=None)
         self.assertIn("threadId", missing["message"])

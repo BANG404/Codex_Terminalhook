@@ -134,7 +134,24 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     serde_json::to_writer_pretty(&mut file, value).map_err(err)?;
     file.write_all(b"\n").map_err(err)?;
     file.as_file().sync_all().map_err(err)?;
-    file.persist(path).map_err(err)?;
+    let mut attempts = 0;
+    loop {
+        match file.persist(path) {
+            Ok(_) => break,
+            Err(failure)
+                if cfg!(windows)
+                    && matches!(failure.error.raw_os_error(), Some(5 | 32 | 33))
+                    && attempts < 100 =>
+            {
+                // A Windows reader/scanner can temporarily prevent replacement.
+                // Keep the same fully synced file; never regenerate or replay work.
+                file = failure.file;
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(failure) => return Err(err(failure)),
+        }
+    }
     #[cfg(unix)]
     File::open(parent)
         .and_then(|directory| directory.sync_all())
