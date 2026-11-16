@@ -1,0 +1,12 @@
+{
+  "name": "terminalhook-local",
+  "interface": { "displayName": "TerminalHook" },
+  "plugins": [
+    {
+      "name": "terminalhook",
+      "source": { "source": "local", "path": "./plugins/terminalhook" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
+    }
+  ]
+}
