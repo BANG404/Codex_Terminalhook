@@ -33,14 +33,15 @@ export class HostBridge {
   post(message: object) {
     window.parent.postMessage({ jsonrpc: "2.0", ...message }, this.origin);
   }
-  private rpc<T>(method: string, params: object): Promise<T> {
+  private rpc<T>(method: string, params: object, timeoutMs = 20000): Promise<T> {
     if (this.stopped) return Promise.reject(new Error("Panel closed"));
     return new Promise((resolve, reject) => {
       const id = ++this.nextId;
       const timer = setTimeout(() => {
+        this.post({ method: "notifications/cancelled", params: { requestId: id, reason: "Host response timed out" } });
         this.pending.delete(id);
         reject(new Error("Host response timed out"));
-      }, 20000);
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.post({ id, method, params });
     });
@@ -57,9 +58,9 @@ export class HostBridge {
     this.theme(result.hostContext?.theme);
     this.post({ method: "ui/notifications/initialized", params: {} });
   }
-  async tool<T>(name: "list_tasks" | "get_task", args: object = {}) {
+  async tool<T>(name: "list_tasks" | "get_task" | "watch_tasks", args: object = {}) {
     return data<T>(
-      await this.rpc<ToolResult>("tools/call", { name, arguments: args }),
+      await this.rpc<ToolResult>("tools/call", { name, arguments: args }, name === "watch_tasks" ? 600000 : 20000),
     );
   }
   private theme(theme?: string) {
@@ -101,7 +102,8 @@ export class HostBridge {
     if (this.stopped) return;
     this.stopped = true;
     window.removeEventListener("message", this.receive);
-    for (const entry of this.pending.values()) {
+    for (const [id, entry] of this.pending) {
+      this.post({ method: "notifications/cancelled", params: { requestId: id, reason: "Panel closed" } });
       clearTimeout(entry.timer);
       entry.reject(new Error("Panel closed"));
     }

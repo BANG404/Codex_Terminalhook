@@ -169,7 +169,6 @@
 }
 .task-row[aria-pressed="true"] {
   background: var(--accent);
-  box-shadow: inset 2px 0 var(--primary);
 }
 .task-title {
   gap: 8px;

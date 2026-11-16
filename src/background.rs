@@ -103,6 +103,13 @@ pub struct TaskRequest {
     pub task_id: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WatchTasksRequest {
+    /// Revision from the previous list snapshot. Wait for an actual state change.
+    pub after_revision: String,
+}
+
 #[derive(Deserialize, Serialize)]
 struct Job {
     task_id: String,
@@ -370,11 +377,72 @@ pub async fn list(thread_id: &str) -> Result<Value, String> {
             tasks.push(state);
         }
     }
-    tasks.sort_by_key(|task| std::cmp::Reverse(task["created_at_ms"].as_u64().unwrap_or(0)));
+    tasks.sort_by(|left, right| {
+        right["created_at_ms"]
+            .as_u64()
+            .unwrap_or(0)
+            .cmp(&left["created_at_ms"].as_u64().unwrap_or(0))
+            .then_with(|| left["task_id"].as_str().cmp(&right["task_id"].as_str()))
+    });
     // Avoid an unbounded model result; full individual results stay available through get_task.
     let total = tasks.len();
     tasks.truncate(100);
-    Ok(json!({"tasks":tasks,"total":total,"truncated":total>100}))
+    let mut snapshot = json!({"tasks":tasks,"total":total,"truncated":total>100});
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    snapshot.to_string().hash(&mut hash);
+    snapshot["revision"] = json!(format!("{:016x}", hash.finish()));
+    Ok(snapshot)
+}
+
+pub async fn watch_tasks(
+    request: WatchTasksRequest,
+    thread_id: &str,
+    cancellation: CancellationToken,
+) -> Result<Value, String> {
+    use notify::{Event, RecursiveMode, Watcher};
+    if request.after_revision.len() != 16
+        || !request
+            .after_revision
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("after_revision must come from a task list snapshot".into());
+    }
+    let root = bridge::task_root()?;
+    private_dir(&root)?;
+    let (sender, mut events) = tokio::sync::mpsc::channel(1);
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
+        // Coalesce native filesystem callbacks. Reads/access and log writes do
+        // not drive panel updates; state/result atomic replacements do.
+        if event.as_ref().is_ok_and(|event| {
+            matches!(event.kind, notify::EventKind::Access(_))
+                || event.paths.iter().all(|path| {
+                    !matches!(
+                        path.file_name().and_then(|name| name.to_str()),
+                        Some("state.json" | "result.json")
+                    )
+                })
+        }) {
+            return;
+        }
+        let _ = sender.try_send(event.map(|_| ()).map_err(err));
+    })
+    .map_err(err)?;
+    watcher
+        .watch(&root, RecursiveMode::Recursive)
+        .map_err(err)?;
+    // Register before reading, so completion during subscription cannot be lost.
+    loop {
+        let snapshot = list(thread_id).await?;
+        if snapshot["revision"] != request.after_revision {
+            return Ok(snapshot);
+        }
+        tokio::select! {
+            event = events.recv() => event.ok_or("Task event subscription closed")??,
+            _ = cancellation.cancelled() => return Err("Task event subscription cancelled".into()),
+        }
+    }
 }
 
 async fn control(path: &Path, action: &str) -> Result<(), String> {

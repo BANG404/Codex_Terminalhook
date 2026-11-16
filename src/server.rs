@@ -10,7 +10,7 @@ use rmcp::{
 use serde_json::{Value, json};
 
 use crate::{
-    background::{self, SubmitRequest, TaskRequest},
+    background::{self, SubmitRequest, TaskRequest, WatchTasksRequest},
     process::Manager,
     spec::{ProcessRequest, RunRequest, WaitRequest, WriteRequest},
 };
@@ -107,13 +107,21 @@ impl TerminalHook {
                     .unwrap()
                     .clone(),
             ),
+            Tool::new(
+                "watch_tasks",
+                "App-only task subscription. Wait for a native filesystem state event after a list revision; no timer, polling, command launch, or model turn.",
+                schemars::schema_for!(WatchTasksRequest)
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
         ];
         tools
             .into_iter()
             .map(|mut tool| {
                 if matches!(
                     tool.name.as_ref(),
-                    "list_tasks" | "get_task" | "check_background"
+                    "list_tasks" | "get_task" | "check_background" | "watch_tasks"
                 ) {
                     tool.annotations = Some(
                         ToolAnnotations::new()
@@ -123,7 +131,16 @@ impl TerminalHook {
                             .open_world(false),
                     );
                 }
-                if matches!(
+                if tool.name == "watch_tasks" {
+                    tool.meta = Some(
+                        json!({"ui":{"visibility":["app"]}})
+                            .as_object()
+                            .unwrap()
+                            .clone()
+                            .into(),
+                    );
+                    tool
+                } else if matches!(
                     tool.name.as_ref(),
                     "submit_task" | "get_task" | "list_tasks"
                 ) {
@@ -191,6 +208,7 @@ impl ServerHandler for TerminalHook {
                 | "retry_delivery"
                 | "check_background"
                 | "list_tasks"
+                | "watch_tasks"
         ) {
             let result = async {
                 let thread_id = context.meta.get("threadId").and_then(Value::as_str).ok_or("background tools require Codex-provided threadId metadata; never supply a guessed chat ID")?;
@@ -199,6 +217,7 @@ impl ServerHandler for TerminalHook {
                     "submit_task" => background::submit(serde_json::from_value(args).map_err(|e|format!("Invalid arguments: {e}"))?,thread_id,context.ct.clone()).await,
                     "check_background" => crate::bridge::probe(thread_id).await,
                     "list_tasks" => background::list(thread_id).await,
+                    "watch_tasks" => background::watch_tasks(serde_json::from_value(args).map_err(|e|format!("Invalid arguments: {e}"))?,thread_id,context.ct.clone()).await,
                     name => {
                         let task:TaskRequest=serde_json::from_value(args).map_err(|e|format!("Invalid arguments: {e}"))?;
                         match name {"get_task"=>background::get(&task.task_id,thread_id).await,"cancel_task"=>background::cancel(&task.task_id,thread_id).await,_=>background::retry_delivery(&task.task_id,thread_id).await}

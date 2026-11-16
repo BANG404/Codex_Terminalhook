@@ -55,35 +55,38 @@ const child = spawn(
 
 let id = 0;
 const pending = new Map();
+const appRequests = new Map();
 createInterface({ input: child.stdout }).on("line", (line) => {
   const message = JSON.parse(line),
     entry = pending.get(message.id);
   if (!entry) return;
   pending.delete(message.id);
+  appRequests.delete(entry.appId);
   clearTimeout(entry.timer);
   message.error
     ? entry.reject(new Error(JSON.stringify(message.error)))
     : entry.resolve(message.result);
 });
-function rpc(method, params) {
+function rpc(method, params, appId) {
   return new Promise((resolve, reject) => {
     const ident = ++id,
       timer = setTimeout(() => {
         pending.delete(ident);
         reject(new Error(method + " timed out"));
-      }, 20000);
-    pending.set(ident, { resolve, reject, timer });
+      }, params?.name === "watch_tasks" ? 600000 : 20000);
+    if (appId != null) appRequests.set(appId, ident);
+    pending.set(ident, { resolve, reject, timer, appId });
     child.stdin.write(
       JSON.stringify({ jsonrpc: "2.0", id: ident, method, params }) + "\n",
     );
   });
 }
-function tool(name, args = {}) {
+function tool(name, args = {}, appId) {
   return rpc("tools/call", {
     name,
     arguments: args,
     _meta: { threadId: owner },
-  });
+  }, appId);
 }
 let browser;
 try {
@@ -110,7 +113,7 @@ try {
       args: [
         "-u",
         "-c",
-        "import time; print('Build started'); time.sleep(1); print('<img src=x onerror=alert(1)>'); print('Build finished 中文')",
+        "import time; print('Build started'); time.sleep(3); print('<img src=x onerror=alert(1)>'); print('Build finished 中文')",
       ],
       cwd: root,
     })
@@ -131,7 +134,11 @@ try {
     requests = [];
   page.on("pageerror", (error) => errors.push(String(error)));
   page.on("request", (request) => requests.push(request.url()));
-  await page.exposeFunction("callMcp", (name, args) => tool(name, args));
+  await page.exposeFunction("callMcp", (name, args, appId) => tool(name, args, appId));
+  await page.exposeFunction("cancelMcp", (appId) => {
+    const requestId = appRequests.get(appId);
+    if (requestId != null) child.stdin.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/cancelled",params:{requestId}})+"\n");
+  });
   await page.setContent(
     '<style>body{margin:0;background:#eef0f4;padding:18px}iframe{width:100%;height:800px;border:0;border-radius:14px}</style><iframe title="TerminalHook task dashboard"></iframe>',
   );
@@ -144,6 +151,7 @@ try {
       if (event.source !== frame.contentWindow) return;
       const message = event.data;
       window.hostCalls.push(message.method);
+      if (message.method === "notifications/cancelled") { await window.cancelMcp(message.params.requestId); return; }
       if (message.method === "ui/notifications/size-changed") {
         window.sizes.push(message.params);
         frame.style.height = `${message.params.height}px`;
@@ -159,6 +167,7 @@ try {
       else if (message.method === "tools/call") {
         const { name, arguments: args } = message.params;
         window.toolCalls.push(name);
+        if (name === "watch_tasks" && window.fixture) return;
         result = window.fixture
           ? {
               structuredContent:
@@ -166,7 +175,7 @@ try {
                   ? { tasks: window.fixture.tasks }
                   : window.fixture.details[args.task_id],
             }
-          : await window.callMcp(name, args);
+          : await window.callMcp(name, args, message.id);
       } else return;
       frame.contentWindow.postMessage(
         { jsonrpc: "2.0", id: message.id, result },
@@ -174,7 +183,7 @@ try {
       );
       // Hosts may echo app-initiated calls as callbacks too. These must not
       // cause a list/get/list feedback loop.
-      if (message.method === "tools/call")
+      if (message.method === "tools/call" && !window.noEcho)
         frame.contentWindow.postMessage(
           {
             jsonrpc: "2.0",
@@ -203,6 +212,7 @@ try {
   }
   await frame.getByRole("button", { name: /dashboard-verification/ }).waitFor();
   await frame.locator('#detail[aria-busy="false"] pre').waitFor();
+  assert.equal(await frame.locator('.task-row[aria-pressed="true"]').evaluate(row => getComputedStyle(row).boxShadow), "none");
   assert.equal(
     await frame.locator("header, h1, select, [role=switch]").count(),
     0,
@@ -212,12 +222,19 @@ try {
     0,
   );
   assert.equal(await frame.locator("html").getAttribute("lang"), "en");
-  const callsBeforeIdle = await page.evaluate(() => window.toolCalls.length);
+  // The native worker event subscription updates the panel without an injected
+  // tool-result notification or a periodic list request.
+  await frame.locator('.task-row[aria-pressed="true"] .status-badge').filter({hasText: "completed"}).waitFor();
+  await frame.locator("#detail pre").filter({hasText: "Build finished"}).waitFor();
+  await frame.getByLabel("Delivery: delivered", {exact: true}).waitFor();
+  await frame.locator('#detail[aria-busy="false"]').waitFor();
+  await frame.locator("main").screenshot({path:path.join(root,"artifacts/dashboard-completed.png")});
+  const callsAfterCompletion = await page.evaluate(() => window.toolCalls.length);
   // Longer than the former three-second refresh interval: no background calls.
   await page.waitForTimeout(4200);
   assert.equal(
     await page.evaluate(() => window.toolCalls.length),
-    callsBeforeIdle,
+    callsAfterCompletion,
   );
   await frame.locator("body").evaluate((body) => {
     for (const hidden of [true, false]) {
@@ -238,7 +255,7 @@ try {
     .waitFor();
   assert.equal(
     await page.evaluate(() => window.toolCalls.length),
-    callsBeforeIdle,
+    callsAfterCompletion,
   );
   assert.equal(await frame.locator("#detail pre img").count(), 0);
   assert.match(
@@ -293,6 +310,14 @@ try {
     };
   }
   await page.evaluate((fixture) => {
+    window.fixture = structuredClone(fixture);
+    window.fixture.details[fixture.tasks[0].task_id].status = "completed";
+    window.noEcho = true;
+  }, fixture);
+  await notify({ structuredContent: { tasks: fixture.tasks } });
+  await frame.getByRole("button", { name: /build-release completed/ }).waitFor();
+  await page.evaluate((fixture) => {
+    window.noEcho = false;
     window.fixture = fixture;
   }, fixture);
   await notify({ structuredContent: { tasks: fixture.tasks } });
@@ -414,7 +439,7 @@ try {
   );
   assert.deepEqual(
     [...new Set(await page.evaluate(() => window.toolCalls))].sort(),
-    ["get_task", "list_tasks"],
+    ["get_task", "list_tasks", "watch_tasks"],
   );
   const evidence = {
     passed: true,
@@ -424,6 +449,8 @@ try {
     no_header_or_refresh_controls: true,
     no_idle_or_visibility_polling: true,
     callback_updates: true,
+    native_worker_event_updates: true,
+    no_selected_row_border: true,
     callback_echo_no_loop: true,
     filtering: true,
     details_collapse: true,
@@ -444,6 +471,9 @@ try {
   console.log(JSON.stringify(evidence));
 } finally {
   if (browser) await browser.close();
+  for (const entry of pending.values()) clearTimeout(entry.timer);
+  pending.clear();
+  appRequests.clear();
   host.kill();
   child.stdin.end();
   await new Promise((resolve) => {
