@@ -1,0 +1,13 @@
+{
+  "name": "terminalhook",
+  "version": "0.5.0-beta.42.g0023bd7dad6f",
+  "description": "Wait locally for terminal events through direct MCP calls without model polling.",
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TerminalHook",
+    "shortDescription": "Wait for terminal output without polling",
+    "longDescription": "Call terminal tools directly and await one local result. Includes output matching, UTF-8 PowerShell, interactive terminals and process-tree cleanup. No lifecycle hooks required.",
+    "category": "Developer Tools"
+  }
+}
