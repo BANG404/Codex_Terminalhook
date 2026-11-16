@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.0",
+  "baseVersion": "0.5.0",
+  "channel": "production",
+  "revision": "9467e76c2ab728a5c181e535d855837911fc78d5",
+  "sequence": 46,
+  "sourceDateEpoch": 1794816427,
+  "builtAt": "2026-11-16T08:07:07+00:00",
+  "dirty": false
+}
