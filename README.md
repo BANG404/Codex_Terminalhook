@@ -104,6 +104,29 @@ The synchronous Stop hook, background submission, and model audit implementation
 | `write_input` | Send input and optionally register a wait at the same time, preventing missed immediate responses |
 | `stop_process` | Terminate the managed process tree and wait for cleanup |
 
+### Avoid model-driven polling
+
+For one-shot commands, builds, tests, and CI/CD, make the first `run_until` wait
+for the final outcome or natural exit. Do not return on startup, PR creation,
+`queued`, or `in_progress` messages merely to issue more waits. To await natural
+exit with the current API, supply a specific regex the command will never emit;
+`exited_unmatched` with exit code 0 then establishes successful completion.
+A matched output line alone does not establish command success.
+
+Choose a timeout for the expected task duration, up to 600000 ms and below the
+client's tool timeout (660 seconds in the package). Local waiting avoids model
+polling within one call; repeated 30- or 60-second calls still cause model round
+trips. Do not split waits solely for periodic progress reports. After a timeout,
+diagnose/report the unresolved state before deciding recovery; do not
+automatically repeat the wait. Work exceeding the per-call limit needs a bounded
+continuation plan with an overall deadline.
+
+Use `wait_output` when a retained process needs a later condition after a genuine
+intermediate action or other useful work, such as checking a running service.
+For input that needs a response, use `write_input` with `wait` in one call.
+These are model-facing usage instructions; the server does not enforce a ban on
+repeated waits, and they do not guarantee a model request count.
+
 ### Start and wait
 
 ```json

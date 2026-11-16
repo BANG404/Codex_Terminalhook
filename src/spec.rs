@@ -35,12 +35,15 @@ pub struct RuleInput {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WaitSpec {
-    /// 1..16 named Rust regex patterns. No lookaround/backreferences or empty matches.
+    /// 1..16 named Rust regex patterns. For one-shot tasks, target the final outcome,
+    /// not startup/progress messages. For natural exit, use a specific never-emitted marker.
+    /// No lookaround/backreferences or empty matches.
     pub until: Vec<RuleInput>,
     /// stdout/stderr (pipe) or terminal (PTY). Omit for all available sources.
     #[serde(default)]
     pub streams: Vec<String>,
-    /// 1..600000 ms, default 300000. Keep below the MCP client's timeout.
+    /// 1..600000 ms, default 300000. Choose a task-sized wait below the client timeout,
+    /// not short intervals for progress polling. Do not automatically repeat on timeout.
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
     /// line (default) or a bounded multiline window.
@@ -76,8 +79,11 @@ pub struct RunRequest {
     pub cwd: String,
     #[serde(flatten)]
     pub wait: WaitSpec,
+    /// Default terminate. Keep running for a service or a genuine intermediate action,
+    /// not merely to return early and continue waiting for a one-shot task.
     #[serde(default)]
     pub on_match: Action,
+    /// Default terminate. Keeping a process on timeout does not authorize repeated waits.
     #[serde(default)]
     pub on_timeout: Action,
     #[serde(default)]
@@ -111,7 +117,9 @@ pub struct WriteRequest {
     /// Pipe only: close stdin after writing. PTY EOF is application-specific.
     #[serde(default)]
     pub eof: bool,
-    /// Optional wait registered before sending input. Timeout/cancellation leaves the process running.
+    /// Include when a response is needed, avoiding a separate write-then-poll sequence.
+    /// Registered before sending input. Timeout/cancellation leaves the process running;
+    /// do not automatically resend input or repeat the wait.
     pub wait: Option<WaitSpec>,
 }
 #[derive(Deserialize, JsonSchema)]
