@@ -9,17 +9,66 @@ snapshot seeds all four branches with the same commit. Subsequent changes use PR
 
 | Source branch | Artifact version | GitHub Release |
 | --- | --- | --- |
-| alpha | `0.5.0-alpha.<commit-count>.g<12-char-sha>` | Prerelease |
-| beta | `0.5.0-beta.<commit-count>.g<12-char-sha>` | Prerelease |
-| rc | `0.5.0-rc.<commit-count>.g<12-char-sha>` | Prerelease |
-| main | `0.5.0` | Stable |
-| Feature branch / PR | `0.5.0-development.<commit-count>.g<12-char-sha>` | Not publishable |
+| alpha | `<target>-alpha.<commit-count>.g<12-char-sha>` | Prerelease |
+| beta | `<target>-beta.<commit-count>.g<12-char-sha>` | Prerelease |
+| rc | `<target>-rc.<commit-count>.g<12-char-sha>` | Prerelease |
+| main | `<target>` | Stable |
+| Feature branch / PR | `<target>-development.<commit-count>.g<12-char-sha>` | Not publishable |
 
 `Cargo.toml`, `Cargo.lock` and the source plugin manifest share a stable version
-baseline. Change them together for the next stable release. Channel suffixes are
-derived during packaging without editing tracked files. The binary's `--version`,
+bootstrap/minimum baseline. Ordinary releases do not require editing those files;
+if the minimum is explicitly changed, update all three together. The target and
+channel suffixes are derived during packaging without editing tracked files. The binary's `--version`,
 MCP server identity, packaged manifest and `build-info.json` agree. CI rejects a
 dirty checkout, a mismatched source SHA or a mismatched channel/branch.
+
+## Automatic target version
+
+`scripts/version.py` reads the highest applicable stable `vMAJOR.MINOR.PATCH`
+Git tag and the complete, non-merge commit messages since its retained source.
+It applies the largest [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+change once per release cycle:
+
+| Unreleased commit | Target change |
+| --- | --- |
+| `fix:` or `perf:` (optional scope) | Increment patch |
+| `feat:` (optional scope) | Increment minor and reset patch |
+| Any type with `!`, `BREAKING CHANGE:`, or `BREAKING-CHANGE:` | Before 1.0, increment minor and reset patch; from 1.0, increment major and reset minor/patch |
+| Other types or non-conventional messages | No version increment |
+
+Types are case-insensitive; breaking footers must use the uppercase spelling.
+For example, after `v0.5.0`, fixes target `0.5.1`; a feature or breaking change
+targets `0.6.0`. Multiple fixes do not increment the patch multiple times.
+The pre-1.0 breaking-change rule is this project's policy, consistent with
+[SemVer's initial-development stage](https://semver.org/spec/v2.0.0.html#spec-item-4).
+
+Tree-preserving delivery and promotion merges are unwrapped to their retained
+source, so a stable tag on main applies even if main was never merged back into
+alpha. Alpha, beta and rc share the target for the same source, and production
+removes the prerelease suffix. Promotion merge messages do not trigger another
+bump. New alpha commits cannot change an older beta/rc candidate. A stable tag
+for the same retained source preserves the target and build identity on retries.
+A published alpha/beta/rc tag pins that source's target even if an older cycle
+goes stable during promotion. Its embedded source SHA and commit count must match;
+conflicting targets fail closed. Prerelease tags never become the baseline for
+new source; stable tags from unrelated or newer source are ignored.
+
+Fetch full history and all release tags before packaging (`git fetch --tags`,
+and `git fetch --unshallow --tags` for a shallow checkout). Shallow histories
+are rejected; CI's version-consuming checkouts already use `fetch-depth: 0`.
+Without an applicable stable tag the configured baseline bootstraps the first
+release. `baseVersion` in `build-info.json` records the resolved target. A cycle
+containing only documentation, tooling or other non-release commits keeps the
+previous target; immutable publication still refuses to reuse an existing stable
+version for a different source. Such a cycle needs a release-triggering commit
+before a new production release.
+
+Run the version and release-policy regressions with:
+
+```sh
+python3 -m unittest discover -s tests -p 'test_version.py' -v
+python3 -m unittest discover -s tests -p 'test_release_policy.py' -v
+```
 
 ## Task completion and automatic alpha delivery
 

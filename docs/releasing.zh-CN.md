@@ -8,16 +8,58 @@ CI 会拒绝跳过阶段以及来自 fork 的提升。仓库初始快照以相�
 
 | 来源分支 | 产物版本 | GitHub Release |
 | --- | --- | --- |
-| alpha | `0.5.0-alpha.<commit-count>.g<12-char-sha>` | 预发布 |
-| beta | `0.5.0-beta.<commit-count>.g<12-char-sha>` | 预发布 |
-| rc | `0.5.0-rc.<commit-count>.g<12-char-sha>` | 预发布 |
-| main | `0.5.0` | 稳定版 |
-| 功能分支 / PR | `0.5.0-development.<commit-count>.g<12-char-sha>` | 不可发布 |
+| alpha | `<target>-alpha.<commit-count>.g<12-char-sha>` | 预发布 |
+| beta | `<target>-beta.<commit-count>.g<12-char-sha>` | 预发布 |
+| rc | `<target>-rc.<commit-count>.g<12-char-sha>` | 预发布 |
+| main | `<target>` | 稳定版 |
+| 功能分支 / PR | `<target>-development.<commit-count>.g<12-char-sha>` | 不可发布 |
 
-`Cargo.toml`、`Cargo.lock` 和源码插件清单共享稳定版本基线。
-准备下一个稳定版本时须同步修改。渠道后缀在打包时生成，不修改受版本控制的文件。
+`Cargo.toml`、`Cargo.lock` 和源码插件清单共享首发版本及最低版本基线。
+普通发布无需修改这些文件；显式调整最低版本时须同步修改三者。
+目标版本和渠道后缀在打包时生成，不修改受版本控制的文件。
 二进制的 `--version`、MCP 服务标识、包内清单和 `build-info.json` 保持一致。
 CI 会拒绝工作区不干净、源码 SHA 不匹配或渠道与分支不匹配的构建。
+
+## 自动计算目标版本
+
+`scripts/version.py` 读取适用的最高稳定 Git 标签 `vMAJOR.MINOR.PATCH`，
+并分析其保留的源码之后所有非合并提交的完整消息，按
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+选择影响最大的变更，每个发布周期只递增一次：
+
+| 尚未正式发布的提交 | 目标版本变化 |
+| --- | --- |
+| `fix:` 或 `perf:`（允许 scope） | 递增补丁号 |
+| `feat:`（允许 scope） | 递增次版本号，补丁号归零 |
+| 任意类型带 `!`、`BREAKING CHANGE:` 或 `BREAKING-CHANGE:` | 1.0 之前递增次版本号、补丁号归零；1.0 起递增主版本号、次版本号和补丁号归零 |
+| 其他类型或不符合约定的消息 | 不递增版本号 |
+
+提交类型不区分大小写；破坏性变更 footer 必须使用上述大写形式。
+例如，`v0.5.0` 之后只有修复时目标为 `0.5.1`，存在新功能或破坏性变更时目标为 `0.6.0`。
+多个修复不会多次递增补丁号。1.0 之前的破坏性变更规则是本项目的明确策略，
+符合 [SemVer 对初始开发阶段的定义](https://semver.org/spec/v2.0.0.html#spec-item-4)。
+
+脚本沿源码树不变的交付和阶段合并追溯保留的源码，因此 main 上的稳定标签即使尚未合回 alpha
+也可作为基线。同一源码的 alpha、beta、rc 共用目标版本，production 去掉预发布后缀。
+阶段合并消息不会再次触发版本升级。alpha 的新提交不会改变旧 beta/rc 候选版本。
+同一保留源码的稳定标签确保重跑时目标版本和构建身份不变。
+已发布的 alpha/beta/rc 标签会固定该源码的目标版本，避免较早周期在晋级期间发布稳定版后改变目标。
+标签内嵌的源码 SHA 和提交数必须匹配；目标版本冲突会阻断构建。
+预发布标签不会成为新源码的版本基线；来自无关或更新源码的稳定标签会被忽略。
+
+打包前须获取完整历史和全部发布标签：`git fetch --tags`；浅克隆则先执行
+`git fetch --unshallow --tags`。脚本拒绝浅历史，CI 中消费版本的 checkout 已使用 `fetch-depth: 0`。
+没有适用稳定标签时，使用配置基线初始化首发版本。
+`build-info.json` 中的 `baseVersion` 记录计算后的目标版本。
+只有文档、工具链等非发布提交的周期保留上个目标版本；不可变发布规则仍会拒绝将已存在的稳定版本用于不同源码。
+这类周期需要包含触发升级的提交后，才能发布新的 production 版本。
+
+运行版本与发布策略回归测试：
+
+```sh
+python3 -m unittest discover -s tests -p 'test_version.py' -v
+python3 -m unittest discover -s tests -p 'test_release_policy.py' -v
+```
 
 ## 任务完成与自动交付到 alpha
 

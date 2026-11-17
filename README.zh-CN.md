@@ -22,7 +22,7 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、�
 
 TerminalHook 通过 Git marketplace 分发，包含原生二进制、MCP 配置和运行期技能。安装器自动选择当前系统和架构。Windows 保留 `marketplace` 及 `marketplace-alpha/beta/rc`；Unix 分支在渠道分支后追加 `-linux-x64`、`-linux-arm64`、`-macos-x64` 或 `-macos-arm64`。各平台/渠道在首次执行发布版 Release 工作流后可用。源码分支不包含编译后二进制，不能直接作为二进制 marketplace 安装。
 
-开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。阶段包版本带提交序号和源码 SHA，发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.zh-CN.md)。项目使用 [MIT 许可证](LICENSE)。
+开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。根据适用稳定版之后的 Conventional Commits 计算共同目标版本；alpha/beta/rc 添加渠道、提交序号和源码 SHA，production 使用无后缀目标版本。发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.zh-CN.md)。项目使用 [MIT 许可证](LICENSE)。
 
 开发任务使用 `scripts/deliver.py` 及仓库的[任务完成规则](AGENTS.md)，自动提交 alpha PR，并在当前来源的实际 CI 成功后合并。这不会提升后续阶段或发布版本。参见[自动交付到 alpha](docs/releasing.zh-CN.md#任务完成与自动交付到-alpha)。
 
