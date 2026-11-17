@@ -1,8 +1,8 @@
 //! Durable, detached jobs with a completion outbox owned by the originating chat.
 use crate::{
     bridge::{self, Bridge},
-    process::Manager,
-    spec::{self, Action, MatchMode, Mode, RuleInput, RunRequest, WaitSpec},
+    process,
+    spec::{self, CommandSpec, MatchMode, OutputSpec, RuleInput},
 };
 use fs2::FileExt;
 use schemars::JsonSchema;
@@ -48,51 +48,29 @@ pub struct SubmitRequest {
 }
 
 impl SubmitRequest {
-    fn run_request(&self, logs: &Path) -> RunRequest {
-        RunRequest {
+    fn command(&self, logs: &Path) -> CommandSpec {
+        CommandSpec {
             program: self.program.clone(),
             args: self.args.clone(),
             cwd: self.cwd.clone(),
             env: self.env.clone(),
-            mode: Mode::Pipe,
-            rows: 24,
-            cols: 120,
-            wait: WaitSpec {
+            output: OutputSpec {
                 until: self.until.clone(),
                 streams: self.streams.clone(),
-                timeout_ms: 300_000,
                 match_mode: self.match_mode,
                 window_bytes: 65536,
             },
-            on_match: Action::Terminate,
-            on_timeout: Action::Terminate,
-            log_dir: Some(logs.to_string_lossy().into_owned()),
+            log_dir: logs.to_string_lossy().into_owned(),
         }
     }
     fn validate(&self) -> Result<(), String> {
         if self.task_key.is_empty() || self.task_key.len() > 128 {
             return Err("task_key must be 1..128 bytes".into());
         }
-        // Duration construction accepts large values; keep an explicit finite deadline within Tokio's supported range.
-        if self
-            .timeout_ms
-            .is_some_and(|ms| ms == 0 || ms > 31_536_000_000)
-        {
-            return Err(
-                "timeout_ms must be 1..31536000000, or null for no execution deadline".into(),
-            );
-        }
-        let run = self.run_request(Path::new(&self.cwd));
-        spec::validate_run(&run)?;
-        if !self.until.is_empty() {
-            spec::validate_rules(&run.wait, Mode::Pipe)?;
-        } else if self
-            .streams
-            .iter()
-            .any(|s| !["stdout", "stderr"].contains(&s.as_str()))
-        {
-            return Err("streams must use stdout/stderr".into());
-        }
+        spec::validate_deadline(self.timeout_ms)?;
+        let command = self.command(Path::new(&self.cwd));
+        spec::validate_run(&command)?;
+        spec::validate_wait(&command.output)?;
         Ok(())
     }
 }
@@ -613,20 +591,17 @@ async fn run_worker(path: &Path) -> Result<(), String> {
             .await;
         }
     });
-    let manager = Manager::new()?;
     let result = if path.join("cancel.request").exists() {
         cancellation.cancel();
         Ok(json!({"status":"cancelled","message":"cancelled before command launch"}))
     } else {
-        manager
-            .run_with_deadline(
-                job.request.run_request(path),
-                cancellation.clone(),
-                job.request.timeout_ms.map(Duration::from_millis),
-            )
-            .await
+        process::execute(
+            job.request.command(path),
+            cancellation.clone(),
+            job.request.timeout_ms.map(Duration::from_millis),
+        )
+        .await
     };
-    manager.shutdown().await;
     control_task.abort();
     let result = match result {
         Ok(result) => result,
@@ -640,7 +615,7 @@ async fn run_worker(path: &Path) -> Result<(), String> {
     } else if result["status"] == "timeout" {
         "timed_out"
     } else if result["status"] == "error"
-        || (result["status"] == "exited_unmatched" && result["exit_code"] != 0)
+        || (result["status"] == "exited" && result["exit_code"] != 0)
     {
         "failed"
     } else {

@@ -17,7 +17,7 @@ Windows worker 不继承启动器句柄，任务输出流不会拖住短暂的�
 `check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
 提交会在启动命令前失败。宿主必须提供共享控制端点，仅有桌面 App Server 进程或磁盘上的
 socket 文件不能证明可连接。使用 `stdio` 通道启动的服务只接受其所属客户端的连接，
-新开聊天不会增加共享 socket。普通终端工具不依赖此后台桥接。
+新开聊天不会增加共享 socket。此版本仅提供后台任务接口；宿主不支持后台桥接时，请使用宿主终端。
 
 代理依次从 `TERMINALHOOK_CODEX_BIN`、宿主的 `CODEX_APP_RUNTIME_CLI_PATH`、
 PATH 中的 `codex` 选择可执行文件。显式 `TERMINALHOOK_PROXY_COMMAND` 的优先级最高。
@@ -38,7 +38,7 @@ PATH 中的 `codex` 选择可执行文件。显式 `TERMINALHOOK_PROXY_COMMAND` 
 App Server（CLI 0.169.0-alpha.11.1），默认共享 socket 返回 Windows 错误 10061，
 拒绝连接。PATH CLI 与桌面内置 CLI 均无法连接。此宿主配置下，当前桥接无法执行后台任务或唤醒聊天。
 不会启动替代 daemon、将聊天恢复到另一个服务，也不会在预检失败后执行命令。
-需要选择已经运行且拥有原聊天的共享宿主，或使用普通终端工具。
+需要选择已经运行且拥有原聊天的共享宿主，或使用宿主终端。
 模拟 socket 测试不能证明原生桌面回调能力。
 
 ### 可选的 Windows 桌面共享宿主
@@ -92,14 +92,15 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 
 `timeout_ms` 可省略或设为 `null`，表示无执行期限；有限期限接受
 1–31536000000 毫秒（一年）。它属于 worker，独立于 660 秒的 MCP 请求超时，
-也不改变 `run_until` / `wait_output` 的上限。
+不受单次 MCP 工具调用时限约束。
 无执行期限时，worker 等待命中、退出、主动取消或 worker/宿主故障；
 不代表能够跨越重启或断电恢复执行。
 
 省略 `until` 或使用 `[]` 表示等待自然退出。
 可选 `until`、`streams`、`match_mode` 使用终端工具原有正则规则。
 命中或达到期限时，先终止并清理进程树，再交付结果。
-后台被动命令使用独立 stdout/stderr 管道；需要交互输入或 PTY 时继续使用普通终端工具。
+后台命令使用独立 stdout/stderr 管道且 stdin 关闭；交互输入和 PTY 使用宿主终端。
+原有 `run_until`、`wait_output`、`write_input`、`stop_process` 已删除，直接调用会被拒绝。
 
 ## 查看、取消与恢复
 
@@ -111,7 +112,8 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 | `retry_delivery {"task_id":"task_…"}` | 重试投递前失败的已保存结果，不重新执行命令 |
 
 执行与交付状态相互独立；`completed` 不代表已交付，还应检查 `delivery` 和真实退出码。
-自然退出码非零时为 `failed`，达到执行期限时为 `timed_out`。
+自然退出结果为 `status: "exited"`，退出码非零时任务为 `failed`，到期时为 `timed_out`。
+结果不再提供连接内进程 ID 或输出游标；任务操作使用持久 `task_id`。
 输出命中对应结果中的 `matched`，并报告清理后的真实退出码；主动终止可能产生非零退出码。
 
 结果先写入磁盘，再通过带独立 `toolOutput` 的 `turn/start` 交付。

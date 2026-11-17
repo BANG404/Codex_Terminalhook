@@ -63,15 +63,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn serve() -> Result<(), Box<dyn std::error::Error>> {
-    let manager = process::Manager::new()?;
-    let service = server::TerminalHook::new(manager.clone())
-        .serve(rmcp::transport::stdio())
-        .await?;
+    let service = server::TerminalHook.serve(rmcp::transport::stdio()).await?;
     let result = tokio::select! {
         result = service.waiting() => result.map(|_| ()),
         _ = tokio::signal::ctrl_c() => Ok(()),
     };
-    manager.shutdown().await;
     result?;
     Ok(())
 }

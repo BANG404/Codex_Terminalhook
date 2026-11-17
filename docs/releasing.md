@@ -106,12 +106,12 @@ security scans while reusing the exact alpha tree's native test evidence.
 
 | Layer | Execution | Gate |
 | --- | --- | --- |
-| Boundary and white-box | Every alpha PR: Rust unit tests, including inclusive input limits and mode-specific streams | All tests pass; `spec.rs` and `matcher.rs` each have at least 90% LLVM line coverage |
+| Boundary and white-box | Every alpha PR: Rust unit tests, including inclusive background input limits and stream selection | All tests pass; `spec.rs` and `matcher.rs` each have at least 90% LLVM line coverage |
 | Black-box and integration | Every alpha PR: stdio MCP, child cleanup, background bridge, package/install/update tests on five platforms | All core protocol and installation scenarios pass |
 | Browser E2E | Every alpha PR on Linux x64; again against the final packaged executable before Release publication | Real MCP dashboard scenarios pass |
 | Static analysis and dependencies | Every PR and Release verification; daily scheduled scan | Clippy warnings fail; Bandit shell-injection rules B602/B604/B605/B609 pass; Cargo audit has no known vulnerabilities; npm audit has no high/critical issues, including development dependencies |
-| Mutation | Weekly, manual Assurance with `deep`, and Release verification | Every viable mutation of `validate_run` / `validate_wait` is caught; surviving mutations, timeouts and baseline failures fail the job |
-| Performance | With mutation verification on Linux x64 | 20 real stdio child launches with 64 KiB output and a 4 KiB matching window; nearest-rank p95 at most 3 seconds |
+| Mutation | Weekly, manual Assurance with `deep`, and Release verification | Every viable mutation of `validate_run` / `validate_deadline` is caught; surviving mutations, timeouts and baseline failures fail the job |
+| Performance | With mutation verification on Linux x64 | 20 real background worker completions with loopback host delivery, 64 KiB output and a 64 KiB matching window; nearest-rank p95 at most 3 seconds |
 
 The coverage gate checks each required file's raw counters and fails on missing,
 duplicate, invalid, or below-threshold evidence. It measures **line coverage**,
@@ -155,7 +155,7 @@ rustup component add llvm-tools-preview
 mkdir -p artifacts/coverage
 cargo llvm-cov --locked --json --summary-only --output-path artifacts/coverage/llvm.json
 python3 scripts/check_coverage.py artifacts/coverage/llvm.json
-cargo mutants --in-place --file src/spec.rs --re 'validate_(run|wait)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
+cargo mutants --in-place --file src/spec.rs --re 'validate_(run|deadline)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
 cargo build --locked
 python3 scripts/verify_performance.py
 ```
@@ -197,8 +197,8 @@ native platform set. All four stages use the same five-target matrix.
 
 The workflow checks the branch, reuses complete alpha source validation, and
 builds the final channel version once per target. Every packaged binary passes
-protocol, installation, Git update, explicit 65-second wait, and 90-second
-interactive UTF-8 regressions. Windows additionally runs the PowerShell UTF-8
+protocol, installation, Git update, a 65-second background task across MCP disconnection, and 90-second
+UTF-8 output regressions. Windows additionally runs the PowerShell UTF-8
 long-wait regression. Stage promotion does not relabel alpha binaries.
 
 The aggregate validates all source identities, checksums, native launch configs,
