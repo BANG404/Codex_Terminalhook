@@ -22,20 +22,22 @@ Git 安装需要已安装 Codex CLI 和 Git。Windows 使用 `marketplace` 或 `
 
 运行期不需要 Rust、Python 或 Node；仅 Unix 安装阶段需要 Python 3.11+，Windows 安装使用 PowerShell 7。Windows 离线安装执行 `pwsh -NoProfile -File ./install.ps1 -Source .`。保留本地安装目录，此模式不需要 Git，不下载后续更新。不带 `-Source` / `--source` 时选择 Git 分发。Unix 解压需保留可执行权限（例如使用 `unzip`）。Linux 构建使用与 Ubuntu 24.04 兼容的 glibc；macOS 二进制未签名，也未公证。
 
-0.4.0 默认使用原生直接调用，不包含 Stop 或其他生命周期 Hook，无需信任 Hook。安装器通过 Codex 配置接口将 `mcp__terminalhook` 加入用户的 `[features.code_mode].direct_only_tool_namespaces`，保留其他命名空间和设置；该管理过程不启动模型。新聊天直接调用 `run_until` 并等待结果，长等待不经 `functions.exec` 包装，命令运行及等待不使用 Codex CLI。通过桌面 UI 手动安装而未运行此脚本时，也需配置该命名空间；项目配置可能覆盖用户设置。宿主必须支持该配置。
+本次发布仅暴露后台任务工具，移除原有 `run_until`、`wait_output`、`write_input`、
+`stop_process` MCP 接口，以及连接内会话、游标续读和 PTY 后端。
+前台及交互工作使用宿主终端。后台命令 stdin 关闭，输出使用独立 stdout/stderr 管道。
+自然退出结果包含 `status: "exited"` 和真实退出码，不再返回进程句柄及输出游标。
 
-历史同步 Stop Hook 版本保存在 https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook 。新版不提供 `submit_task`、`prepare_task`、`await_tasks` 或 `audit_event`。
+安装器将 `mcp__terminalhook` 加入 `[features.code_mode].direct_only_tool_namespaces`，
+并保留其他设置；手动安装也需配置宿主。升级后新开聊天加载新的工具目录。
+当前包使用原生事件与宿主回调，不注册生命周期 Hook。历史 Stop Hook 实现保存在
+[legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。
 
-保留原有四个工具：`run_until` 启动命令并等待正则；`wait_output` 从游标继续等待；`write_input` 发送输入并可同时等待；`stop_process` 清理进程树。等待在本地进行，不返回需要模型轮询的 `pending`。
+请求示例：
 
-可这样向 Codex 发出请求：
+> 使用 TerminalHook 将构建提交为一次后台任务，完成后把结果交付到本聊天。
 
-> 使用 TerminalHook 运行我的开发服务器，等到输出 Local 地址后返回并保留服务。
+长时间后台工作先用 `check_background` 检查宿主，再用稳定的 `task_key`、程序/参数及绝对 `cwd` 调用 `submit_task`。省略 `timeout_ms` 表示无执行期限，省略 `until` 表示自然退出；调用立即返回，随后结束回合等待原聊天收到结果，不要轮询模型。后台 worker 及已保存结果可跨越 MCP 断连，但重启后不会恢复命令执行。兼容宿主中，`list_tasks` 打开紧凑的英语 MCP Apps 面板；`get_task`、`cancel_task`、`retry_delivery` 支持查看、取消和恢复。后台模式需要运行中的共享 Codex daemon、CLI proxy 及宿主提供的 `threadId` 元数据。交付失败保留结果，投递结果未知时不盲目重发。详见[完整指南](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.zh-CN.md)。
 
-运行命令需要明确的本机绝对工作目录。默认使用独立 stdout/stderr 管道；交互命令可选 `mode: "pty"`（Windows ConPTY 或 Unix PTY），对应合并的 `terminal` 输出流。需要 Unix shell 语法时显式调用 `sh -c` / `bash -lc`。默认正则按行匹配，跨行时选择有界 `window` 模式。等待上限 10 分钟，MCP 超时 660 秒。
-
-默认在命中或超时时终止命令；服务场景使用 `on_match: "keep_running"` 并在结束后调用 `stop_process`。可选绝对 `log_dir` 保留轮转的原始日志；默认临时日志在 MCP 连接结束时删除。
-
-插件负责它启动的命令，不能订阅 Codex 内置终端。进程句柄、输出游标和临时日志仅在当前 MCP 连接有效；重连会清理原进程。MCP 命令使用本机账户权限，保留 Codex 默认工具审批行为。
+对于默认使用 stdio 的 Windows 桌面宿主，关闭桌面后，在本解压目录运行 `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1`。此可选适配器让桌面和 worker 共用一个核心，不修改持久设置或命令权限；已有聊天需要在该会话中重新打开。源码构建和隔离测试选项见完整指南。正常启动桌面即可恢复默认传输。
 
 卸载：`codex plugin remove terminalhook@terminalhook-local`；随后可按需执行 `codex plugin marketplace remove terminalhook-local`。
