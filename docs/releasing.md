@@ -107,7 +107,8 @@ the saved candidate; it does not claim the latest combined alpha tree was tested
 
 Required reviews and branch protections still apply. Source-based alpha delivery
 uses non-strict required status checks (`strict: false`), retaining both required
-checks and binding them to GitHub Actions App 15368. This removes the requirement
+checks without an App binding in branch protection. The delivery client still
+verifies the actual GitHub Actions run and jobs described above. This removes the requirement
 that every PR include the latest alpha commit; it does not remove CI or conflict
 checks. Configuration is an explicit repository policy change, not a merge bypass.
 If strict protection is still enabled, a `behind` PR stops with a policy diagnostic
