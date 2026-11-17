@@ -1,6 +1,6 @@
 {
   "name": "terminalhook",
-  "version": "0.5.0-alpha.75.gb4a4bce56b80",
+  "version": "0.6.0-alpha.88.gc6e19a874379",
   "description": "Durable background commands and event-driven completion delivery to the originating Codex chat.",
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
