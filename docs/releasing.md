@@ -72,7 +72,7 @@ be inspected before removal. Run the focused regressions with
 ## CI
 
 Alpha PRs run formatting, Clippy, Rust unit tests, and Python protocol/release-policy
-tests on five native targets, followed by native package and installation checks:
+tests on five native targets, alongside native package and installation checks:
 
 | Target | Native runner | Binary |
 | --- | --- | --- |
@@ -81,6 +81,19 @@ tests on five native targets, followed by native package and installation checks
 | linux-arm64 | ubuntu-24.04-arm | terminalhook |
 | macos-x64 | macos-15-intel | terminalhook |
 | macos-arm64 | macos-15 | terminalhook |
+
+One Linux job installs the locked frontend dependencies, checks types, and builds
+the dashboard. Native tests, packages, and assurance jobs reuse its `dashboard-bundle`
+artifact from the same run, verifying the source revision and HTML checksum before
+embedding it. Native tests and package builds start together after this bundle is
+ready. `Quality checks` still requires every test and assurance check;
+`Package verification` waits for both quality and every native package before
+assembling distributions. Failed or cancelled tests cannot authorize delivery or
+publication even if package builds finish successfully. Parallel builds reduce
+elapsed time but may do extra work when a test fails.
+
+Standalone Assurance runs build their own dashboard. Promotion-only PRs skip the
+frontend and native builds and continue to require source evidence and security checks.
 
 Each binary is tested from an extracted directory with spaces in its path. Each
 target verifies isolated installation, configuration preservation, Git migration
@@ -101,7 +114,7 @@ runs. Actions are pinned to commit SHAs.
 Test types overlap: the protocol suite supplies black-box, boundary, integration,
 and permission/isolation checks; they are not separate copies of the same suite.
 The reusable `assurance.yml` workflow contributes to **Quality checks**. Its
-failure or cancellation blocks packaging and delivery. Promotion PRs rerun fresh
+failure or cancellation blocks final package assembly and delivery. Promotion PRs rerun fresh
 security scans while reusing the exact alpha tree's native test evidence.
 
 | Layer | Execution | Gate |
@@ -285,6 +298,14 @@ Apps host). `npm run build:ui` writes ignored `ui/dist/index.html`, with all
 scripts, styles, and icons inline. Cargo embeds this file; rebuild it after UI
 changes and before compiling Rust. Packaging runs `npm ci`, type checks, and
 bundling automatically. No CDN or frontend runtime is needed after installation.
+
+CI explicitly passes `--prebuilt-dashboard` to `scripts/package.py` after downloading
+the shared bundle. This option requires `ui/dist/index.html` and its
+`build-info.json` manifest to match the current source revision and checksum;
+missing or mismatched artifacts fail before Rust compilation. Local packaging
+continues to install, check, and build the frontend by default. To create and
+verify a reusable bundle explicitly, run `python3 scripts/dashboard.py build`
+and `python3 scripts/dashboard.py verify`.
 
 ## Local build
 
