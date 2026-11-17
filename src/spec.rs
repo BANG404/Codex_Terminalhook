@@ -198,3 +198,7 @@ pub fn validate_rules(input: &WaitSpec, mode: Mode) -> Result<Vec<Rule>, String>
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "spec_tests.rs"]
+mod tests;

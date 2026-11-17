@@ -35,6 +35,7 @@ jobs:
   policy:
     name: Source and promotion policy
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.mode.outputs.full }}
       matrix: ${{ steps.mode.outputs.matrix }}
@@ -89,6 +90,19 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore native Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
       - name: Verify native host identity
         run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
       - name: Build embedded dashboard
@@ -123,19 +137,29 @@ jobs:
             artifacts/ui-validation.json
           if-no-files-found: ignore
 
+  assurance:
+    needs: policy
+    uses: ./.github/workflows/assurance.yml
+    with:
+      coverage: ${{ needs.policy.outputs.full == 'true' }}
+      deep: ${{ inputs.long_wait == true && inputs.build_package == true }}
+
   quality:
     name: Quality checks
     if: always()
-    needs: [policy, test]
+    needs: [policy, test, assurance]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       POLICY: ${{ needs.policy.result }}
       TEST: ${{ needs.test.result }}
+      ASSURANCE: ${{ needs.assurance.result }}
       FULL: ${{ needs.policy.outputs.full }}
     steps:
       - name: Require policy and every native test
         run: |
           test "$POLICY" = success
+          test "$ASSURANCE" = success
           if [ "$FULL" = true ]; then test "$TEST" = success; else test "$TEST" = skipped; fi
 
   build:
@@ -159,6 +183,19 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore native Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
       - name: Verify native host identity
         run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
       - name: Build the exact source with its channel version
@@ -174,6 +211,13 @@ jobs:
       - name: Explicit release long-wait regressions
         if: inputs.long_wait == true && inputs.build_package == true
         run: python scripts/verify_long_wait.py
+      - name: Verify the final release dashboard through MCP
+        if: matrix.platform == 'linux-x64' && inputs.long_wait == true && inputs.build_package == true
+        env:
+          TERMINALHOOK_EXE: ${{ github.workspace }}/dist/package/plugins/terminalhook/bin/terminalhook
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:ui
       - name: Stage verification evidence with the native archive
         run: python -c "from pathlib import Path; import shutil; [shutil.copyfile(Path('artifacts') / n, Path('dist') / n) for n in ('package-validation.json', 'git-marketplace-validation.json')]"
       - name: Upload the verified native distribution
@@ -202,6 +246,7 @@ jobs:
     if: always()
     needs: [policy, quality, build]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       QUALITY: ${{ needs.quality.result }}
       BUILD: ${{ needs.build.result }}

@@ -96,11 +96,79 @@ can produce `release-distributions` and the aggregate `package-verification` rep
 Changes use PRs; pushes do not duplicate validation, and updated PRs cancel obsolete
 runs. Actions are pinned to commit SHAs.
 
+### Test layers and gates
+
+Test types overlap: the protocol suite supplies black-box, boundary, integration,
+and permission/isolation checks; they are not separate copies of the same suite.
+The reusable `assurance.yml` workflow contributes to **Quality checks**. Its
+failure or cancellation blocks packaging and delivery. Promotion PRs rerun fresh
+security scans while reusing the exact alpha tree's native test evidence.
+
+| Layer | Execution | Gate |
+| --- | --- | --- |
+| Boundary and white-box | Every alpha PR: Rust unit tests, including inclusive input limits and mode-specific streams | All tests pass; `spec.rs` and `matcher.rs` each have at least 90% LLVM line coverage |
+| Black-box and integration | Every alpha PR: stdio MCP, child cleanup, background bridge, package/install/update tests on five platforms | All core protocol and installation scenarios pass |
+| Browser E2E | Every alpha PR on Linux x64; again against the final packaged executable before Release publication | Real MCP dashboard scenarios pass |
+| Static analysis and dependencies | Every PR and Release verification; daily scheduled scan | Clippy warnings fail; Bandit shell-injection rules B602/B604/B605/B609 pass; Cargo audit has no known vulnerabilities; npm audit has no high/critical issues, including development dependencies |
+| Mutation | Weekly, manual Assurance with `deep`, and Release verification | Every viable mutation of `validate_run` / `validate_wait` is caught; surviving mutations, timeouts and baseline failures fail the job |
+| Performance | With mutation verification on Linux x64 | 20 real stdio child launches with 64 KiB output and a 4 KiB matching window; nearest-rank p95 at most 3 seconds |
+
+The coverage gate checks each required file's raw counters and fails on missing,
+duplicate, invalid, or below-threshold evidence. It measures **line coverage**,
+not branch coverage or whole-application coverage. Test code lives in separate
+`*_tests.rs` files excluded by the coverage tool. Stable Rust does not enable
+LLVM's experimental branch instrumentation here. Mutation scope is deliberately
+the process request and timeout validators; expand it with tests when adding
+other critical modules. The performance budget detects gross regressions on the
+Linux CI runner and is not an end-user latency SLA. There is no deployed HTTP
+service to target with DAST: browser isolation and protocol rejection scenarios
+are exercised locally instead of scanning unrelated network services.
+
+Assurance runs daily at 02:17 UTC for security and Mondays at 02:47 UTC for
+security, coverage, mutation and performance. GitHub schedules execute only from
+the repository's default branch, once that branch contains this workflow through
+the normal stage progression. Until then, use the **Assurance** manual dispatch on
+`alpha` (or run the commands locally); alpha PR and Release gates already call
+the reusable workflow directly. Scheduled runs never publish or promote source.
+
+Native jobs pin Node 24 and cache npm downloads and Rust dependencies/builds.
+Rust cache keys separate OS, architecture, job, toolchain, lockfile and revision;
+restore prefixes reuse older dependencies while Cargo rebuilds changed sources.
+Coverage and mutation caches are separate. Archives, identities and verification
+reports are freshly generated; cached output never substitutes for a passing job.
+Security reports, core coverage and deep-test evidence are retained for 14 days,
+including failure diagnostics. No vulnerability exemptions are configured; scan
+errors also fail verification.
+
+Run the extra checks locally with the pinned versions used by the workflow:
+
+```sh
+cargo install cargo-audit --version 0.23.0 --locked
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+cargo install cargo-mutants --version 27.1.0 --locked
+python3 -m pip install bandit==1.9.4
+cargo audit
+npm audit --audit-level=high
+bandit -r scripts -t B602,B604,B605,B609
+npm ci && npm run build:ui
+rustup component add llvm-tools-preview
+mkdir -p artifacts/coverage
+cargo llvm-cov --locked --json --summary-only --output-path artifacts/coverage/llvm.json
+python3 scripts/check_coverage.py artifacts/coverage/llvm.json
+cargo mutants --in-place --file src/spec.rs --re 'validate_(run|wait)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
+cargo build --locked
+python3 scripts/verify_performance.py
+```
+
+Run in an isolated task checkout: the mutation command temporarily edits the
+validator and restores it after testing. The Linux performance probe uses the
+debug binary by default; `TERMINALHOOK_EXE` selects another native executable.
+
 Promotion PRs on beta, rc, and main use lightweight Linux jobs to enforce stage
 order, require the merge tree to equal the source tree, and locate a successful
 alpha CI run with that exact tested tree. Every platform's artifact, checksum,
 and source identity must be available and unexpired. Missing or mismatched evidence
-blocks promotion. No Rust compilation, protocol rerun, or binary relabeling occurs
+blocks promotion. No project Rust compilation, protocol rerun, or binary relabeling occurs
 during promotion. `promotion-validation.json` retains the original evidence.
 Workflow and test changes are part of the tree and require fresh alpha validation.
 

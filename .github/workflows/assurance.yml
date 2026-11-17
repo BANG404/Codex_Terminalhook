@@ -1,0 +1,181 @@
+name: Assurance
+
+on:
+  workflow_call:
+    inputs:
+      coverage:
+        type: boolean
+        default: false
+      deep:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      deep:
+        description: Also run validator mutation tests and process-match performance checks
+        type: boolean
+        default: true
+  schedule:
+    - cron: '17 2 * * *'
+    - cron: '47 2 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assurance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  security:
+    name: Dependency and script security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore the pinned audit tool
+        id: audit-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: audit-${{ runner.os }}-${{ runner.arch }}-0.23.0-${{ hashFiles('rust-toolchain.toml') }}
+      - name: Install the pinned Rust dependency scanner
+        if: steps.audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: Install the pinned Python static analyzer
+        run: python -m pip install bandit==1.9.4
+      - name: Audit all locked Rust dependencies
+        run: |
+          mkdir -p artifacts/security
+          cargo audit --json > artifacts/security/rust-audit.json
+      - name: Audit Node dependencies including build tools
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p artifacts/security
+          npm audit --audit-level=high --json > artifacts/security/npm-audit.json
+      - name: Reject shell injection patterns in Python scripts
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p artifacts/security
+          bandit -r scripts -t B602,B604,B605,B609 -f json -o artifacts/security/bandit.json
+      - name: Upload security evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-evidence
+          path: artifacts/security/
+          if-no-files-found: error
+          retention-days: 14
+
+  coverage:
+    name: Core Rust coverage
+    if: inputs.coverage || github.event_name == 'workflow_dispatch' || github.event.schedule == '47 2 * * 1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore pinned coverage tool and instrumented dependencies
+        id: coverage-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-llvm-cov
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: coverage-${{ runner.os }}-0.9.1-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: coverage-${{ runner.os }}-0.9.1-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+      - name: Install the pinned coverage tool
+        run: |
+          if ! cargo llvm-cov --version | grep -F ' 0.9.1'; then
+            cargo install cargo-llvm-cov --version 0.9.1 --locked --force
+          fi
+          rustup component add llvm-tools-preview
+      - name: Build the embedded dashboard
+        run: |
+          npm ci
+          npm run build:ui
+      - name: Measure Rust unit test coverage
+        run: |
+          mkdir -p artifacts/coverage
+          cargo llvm-cov --locked --json --summary-only --output-path artifacts/coverage/llvm.json
+      - name: Require 90 percent line coverage in each core module
+        run: python3 scripts/check_coverage.py artifacts/coverage/llvm.json
+      - name: Upload coverage evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: core-coverage
+          path: artifacts/coverage/
+          if-no-files-found: error
+          retention-days: 14
+
+  deep:
+    name: Validator mutations and process performance
+    if: inputs.deep || github.event.schedule == '47 2 * * 1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore pinned mutation tool and build dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-mutants
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: mutations-${{ runner.os }}-27.1.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: mutations-${{ runner.os }}-27.1.0-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+      - name: Install the pinned mutation tool
+        run: |
+          if ! cargo mutants --version | grep -F ' 27.1.0'; then
+            cargo install cargo-mutants --version 27.1.0 --locked --force
+          fi
+      - name: Build the test binary and embedded dashboard
+        run: |
+          npm ci
+          npm run build:ui
+          cargo build --locked
+      - name: Require every viable request-boundary mutation to be caught
+        run: cargo mutants --in-place --file src/spec.rs --re 'validate_(run|wait)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
+      - name: Verify bounded process-match latency
+        if: ${{ !cancelled() }}
+        run: python scripts/verify_performance.py
+      - name: Upload mutation and performance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deep-assurance
+          path: |
+            artifacts/mutation/
+            artifacts/performance-validation.json
+          if-no-files-found: error
+          retention-days: 14
