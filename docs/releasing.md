@@ -155,8 +155,12 @@ Required branch checks remain **Quality checks** and **Package verification**.
 They aggregate all native results and reject failed, cancelled, or unexpectedly
 skipped work. Only a complete five-platform archive and installation evidence set
 can produce `release-distributions` and the aggregate `package-verification` report.
-Changes use PRs; pushes do not duplicate validation, and updated PRs cancel obsolete
-runs. Actions are pinned to commit SHAs.
+Automatic PR validation runs only when a PR is opened (`opened`) or its source
+commits change (`synchronize`). Editing a title or description, reopening a PR,
+or marking it ready for review does not start or cancel CI. New source commits
+cancel obsolete runs. Branch pushes do not run a separate CI workflow; explicit
+manual runs and reusable workflow calls remain available. Actions are pinned to
+commit SHAs.
 
 ### Test layers and gates
 
