@@ -1,13 +1,13 @@
 {
   "name": "terminalhook",
   "version": "0.5.0",
-  "description": "Wait locally for terminal events through direct MCP calls without model polling.",
+  "description": "Durable background commands and event-driven completion delivery to the originating Codex chat.",
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
     "displayName": "TerminalHook",
-    "shortDescription": "Wait for terminal output without polling",
-    "longDescription": "Call terminal tools directly and await one local result. Includes output matching, UTF-8 PowerShell, interactive terminals and process-tree cleanup. No lifecycle hooks required.",
+    "shortDescription": "Run background tasks with native event delivery",
+    "longDescription": "Submit authorized background work once, receive saved results in the original chat, and inspect the event-driven task dashboard. Independent workers survive MCP disconnection. No synchronous process tools or lifecycle hooks.",
     "category": "Developer Tools"
   }
 }

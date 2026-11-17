@@ -3,7 +3,7 @@ name = "terminalhook"
 version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Event-driven terminal output waits for Codex over MCP"
+description = "Durable background commands and event-driven task delivery for Codex"
 license = "MIT"
 repository = "https://github.com/BANG404/Codex_Terminalhook"
 readme = "README.md"
@@ -11,14 +11,17 @@ readme = "README.md"
 [dependencies]
 regex = "1"
 regex-syntax = "0.8"
-portable-pty = "0.9"
 tempfile = "3"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
+fs2 = "0.4"
+notify = "8.2"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 rmcp = { version = "3.10", default-features = false, features = ["server", "transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "sync", "time", "signal", "fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "sync", "time", "signal", "fs", "net"] }
 tokio-util = "0.7"
 
 [target.'cfg(windows)'.dependencies]

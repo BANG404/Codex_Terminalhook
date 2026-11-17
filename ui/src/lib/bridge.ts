@@ -1,0 +1,133 @@
+// Host-mediated MCP Apps transport. No network or model-message capability.
+import type { TaskUpdate } from "./tasks";
+
+export class HostResponseTimeout extends Error {}
+export class TaskChatMismatch extends Error {}
+
+function toolError(result: ToolResult): Error {
+  const text = result.content?.find((part) => part.type === "text")?.text;
+  let detail = result.structuredContent as { code?: string; message?: string } | undefined;
+  if (!detail && text) {
+    try { detail = JSON.parse(text); } catch { /* Older hosts may return plain text. */ }
+  }
+  const message = detail?.message ?? text ?? "Tool failed";
+  return detail?.code === "task_chat_mismatch" || message === "task belongs to a different chat"
+    ? new TaskChatMismatch(message)
+    : new Error(message);
+}
+
+interface ToolResult {
+  isError?: boolean;
+  structuredContent?: unknown;
+  content?: { type: string; text?: string }[];
+}
+function data<T>(result: ToolResult): T {
+  const text = result.content?.find((part) => part.type === "text")?.text;
+  if (result.isError) throw toolError(result);
+  return (result.structuredContent ?? (text ? JSON.parse(text) : {})) as T;
+}
+export class HostBridge {
+  private origin = "*";
+  private nextId = 0;
+  private stopped = false;
+  private pending = new Map<
+    number,
+    {
+      resolve: (value: any) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  constructor(
+    private onTasks: (tasks: TaskUpdate) => void,
+    private onStop: () => void,
+    private onError: (error: Error) => void,
+  ) {
+    window.addEventListener("message", this.receive);
+  }
+  post(message: object) {
+    window.parent.postMessage({ jsonrpc: "2.0", ...message }, this.origin);
+  }
+  private rpc<T>(method: string, params: object, timeoutMs = 20000): Promise<T> {
+    if (this.stopped) return Promise.reject(new Error("Panel closed"));
+    return new Promise((resolve, reject) => {
+      const id = ++this.nextId;
+      const timer = setTimeout(() => {
+        this.post({ method: "notifications/cancelled", params: { requestId: id, reason: "Host response timed out" } });
+        this.pending.delete(id);
+        reject(new HostResponseTimeout("Host response timed out"));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      this.post({ id, method, params });
+    });
+  }
+  async connect() {
+    const result = await this.rpc<{ hostContext?: { theme?: string } }>(
+      "ui/initialize",
+      {
+        appInfo: { name: "TerminalHook tasks", version: "2.0.0" },
+        appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+        protocolVersion: "2026-01-26",
+      },
+    );
+    this.theme(result.hostContext?.theme);
+    this.post({ method: "ui/notifications/initialized", params: {} });
+  }
+  async tool<T>(name: "get_task" | "watch_tasks", args: object = {}) {
+    return data<T>(
+      await this.rpc<ToolResult>("tools/call", { name, arguments: args }, name === "watch_tasks" ? 600000 : 20000),
+    );
+  }
+  private theme(theme?: string) {
+    if (theme !== "dark" && theme !== "light") return;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }
+  private receive = (event: MessageEvent) => {
+    if (this.stopped || event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (this.origin === "*" && event.origin && event.origin !== "null")
+      this.origin = event.origin;
+    if (this.origin !== "*" && event.origin !== this.origin) return;
+    if (message.id != null && !message.method) {
+      const entry = this.pending.get(message.id);
+      if (!entry) return;
+      clearTimeout(entry.timer);
+      this.pending.delete(message.id);
+      message.error
+        ? entry.reject(new Error(message.error.message || "Host error"))
+        : entry.resolve(message.result);
+    } else if (message.method === "ui/notifications/host-context-changed")
+      this.theme(message.params?.theme);
+    else if (message.method === "ui/notifications/tool-input") {
+      const task_id = message.params?.arguments?.task_id;
+      if (typeof task_id === "string") this.onTasks({ task_id });
+    } else if (message.method === "ui/notifications/tool-result") {
+      // Some hosts echo cancelled app requests. Transport renewal is silent.
+      if (message.params?.isError && message.params?.structuredContent?.message === "Task event subscription cancelled") return;
+      try {
+        this.onTasks(data<TaskUpdate>(message.params));
+      } catch (error) {
+        this.onError(error instanceof Error ? error : new Error(String(error)));
+      }
+    } else if (message.method === "ping")
+      this.post({ id: message.id, result: {} });
+    else if (message.method === "ui/resource-teardown") {
+      this.post({ id: message.id, result: {} });
+      this.dispose();
+    }
+  };
+  dispose() {
+    if (this.stopped) return;
+    this.stopped = true;
+    window.removeEventListener("message", this.receive);
+    for (const [id, entry] of this.pending) {
+      this.post({ method: "notifications/cancelled", params: { requestId: id, reason: "Panel closed" } });
+      clearTimeout(entry.timer);
+      entry.reject(new Error("Panel closed"));
+    }
+    this.pending.clear();
+    this.onStop();
+  }
+}

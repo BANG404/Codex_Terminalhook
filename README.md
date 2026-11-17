@@ -5,25 +5,30 @@ English | [简体中文](README.zh-CN.md)
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-TerminalHook is a Rust MCP server and Codex plugin for event-driven terminal waits and interactive process control. While a command runs, it continuously reads its output and matches regular expressions. Each call waits until a match, exit, timeout, or cancellation. It does not return `pending`, request model sampling, or require repeated model queries while waiting.
+TerminalHook is a Rust MCP server and Codex plugin for durable background commands,
+event-driven task dashboards, and completion delivery to the originating chat.
+Submit authorized work once, end the turn, and receive its saved result when it
+finishes. Native workers wait without model polling and survive MCP disconnection.
 
-Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS Intel/Apple Silicon. Each target runs Rust and MCP protocol tests plus extracted-package, installation, and Git marketplace update checks. Windows uses Job Objects and ConPTY; Linux/macOS use process groups and Unix PTYs.
+Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS
+Intel/Apple Silicon. Commands use separate stdout/stderr pipes and closed stdin.
+Windows Job Objects and Unix process groups contain command descendants.
 
-## What it does
+This release removes the former synchronous/interactive MCP tools:
+`run_until`, `wait_output`, `write_input`, and `stop_process`. Their dispatch paths,
+connection-local sessions, cursor replay, retained-process controls, and PTY
+backend are removed too. Existing integrations must migrate to the background
+workflow below; use the host terminal for foreground or interactive commands.
 
-- **Wait for terminal events:** watch for a development server's ready URL, a build result, or another regex output condition with `run_until`.
-- **Continue from saved output:** use `wait_output` with a process ID and cursor to consume output received since the previous result.
-- **Control interactive commands:** use pipe or PTY mode and send input with `write_input`, optionally waiting for the response in the same call.
-- **Manage process lifetime:** retain commands when needed, or stop their process trees with `stop_process`; raw output is saved to rotating logs.
-- **Integrate with Codex:** install the plugin with its `terminal-wait` skill or configure standalone MCP. Current versions use direct tool calls without lifecycle hooks.
-
-[Installation and upgrades](#installation-and-upgrades) · [Tool reference](#terminal-tools) · [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) · [Development and releases](docs/releasing.md)
+[Installation](#installation-and-upgrades) · [Task tools](#task-tools) ·
+[Releases](https://github.com/BANG404/Codex_Terminalhook/releases) ·
+[Development and releases](docs/releasing.md)
 
 ## Installation and upgrades
 
 TerminalHook is distributed as a Git marketplace containing the native binary, MCP configuration, and runtime skill. Installers select the current OS and architecture. Windows retains `marketplace` and `marketplace-alpha/beta/rc`; Unix branches append `-linux-x64`, `-linux-arm64`, `-macos-x64`, or `-macos-arm64` to the channel branch. Each platform/channel becomes available after its first published Release workflow run. Source branches contain no compiled binaries and must not be installed as binary marketplaces.
 
-Development follows the `alpha → beta → rc → main` stage branches. Changes go through PRs: `alpha` receives full validation, and later promotions compare source trees and reuse the original verification artifacts, avoiding duplicate push and PR runs. Stage versions include a commit count and source SHA. Publication is triggered manually through the Release workflow. See [Development, CI/CD, and stage releases](docs/releasing.md). The project uses the [MIT license](LICENSE).
+Development follows the `alpha → beta → rc → main` stage branches. Changes go through PRs: `alpha` receives full validation, and later promotions compare source trees and reuse the original verification artifacts, avoiding duplicate push and PR runs. Conventional Commits since the applicable stable release determine a shared target version; alpha/beta/rc add their channel, commit count and source SHA, while production uses the target without a suffix. Publication is triggered manually through the Release workflow. See [Development, CI/CD, and stage releases](docs/releasing.md). The project uses the [MIT license](LICENSE).
 
 Development tasks automatically submit an alpha PR and merge it after the actual current-source CI succeeds, using `scripts/deliver.py` and the repository's [task completion rules](AGENTS.md). This does not promote later stages or publish a release. See [automatic alpha delivery](docs/releasing.md#task-completion-and-automatic-alpha-delivery).
 
@@ -50,7 +55,7 @@ Codex's own startup tasks refresh configured Git marketplaces and their installe
 codex plugin marketplace upgrade terminalhook-local
 ```
 
-Updates follow the selected branch, not GitHub's latest-release API. There is no custom background updater or guaranteed polling interval while the app stays open. Open a new Codex chat after an update. Processes in existing sessions remain managed by their original MCP connection and are not migrated live. See the [official marketplace commands](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace).
+Updates follow the selected branch, not GitHub's latest-release API. There is no custom background updater or guaranteed polling interval while the app stays open. Open a new Codex chat after an update. Existing chats retain their loaded tool catalog; durable background workers continue independently. See the [official marketplace commands](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace).
 
 For offline installation or local development, download the ZIP matching your OS/architecture from [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases), extract it to a permanent directory, and run `pwsh -NoProfile -File ./install.ps1 -Source .` on Windows or `sh ./install.sh --source .` on Linux/macOS. Use an extractor that preserves executable permissions, such as `unzip` on Unix. Without a local source option the installer selects Git stable. CI preview ZIPs are also available in [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions).
 
@@ -61,7 +66,7 @@ pwsh -NoProfile -File scripts/package.ps1
 pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 ```
 
-On Linux/macOS, build with `python3 scripts/package.py --channel development`, then install with `sh scripts/install.sh --source ./dist/package`. Native source builds require the pinned Rust toolchain and Python 3.11+. Linux binaries use glibc (built on Ubuntu 24.04); Alpine/musl and Windows ARM64 are not release targets. macOS artifacts are unsigned and not notarized.
+On Linux/macOS, build with `python3 scripts/package.py --channel development`, then install with `sh scripts/install.sh --source ./dist/package`. Native source builds require the pinned Rust toolchain, Python 3.11+, and Node.js 20.19+ or 22.12+ with npm to bundle the Svelte dashboard. Linux binaries use glibc (built on Ubuntu 24.04); Alpine/musl and Windows ARM64 are not release targets. macOS artifacts are unsigned and not notarized.
 
 `package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. Local installations require the directory to stay available and the installer to be rerun after local changes; they do not download remote updates. In both modes, the installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands and Codex's configuration editing interface to preserve existing settings and add `mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces`. This administration does not send model requests.
 
@@ -74,231 +79,117 @@ codex plugin remove terminalhook@terminalhook-local
 codex plugin marketplace remove terminalhook-local
 ```
 
-## Direct calls and terminal tools
-
-### Desktop app direct calls (tested)
-
-Starting with 0.4.0, native direct calls are the default. There are no lifecycle hooks to review or trust. The installer writes the following user configuration automatically. When installing the plugin manually or configuring standalone MCP, add this namespace to the existing array yourself:
-
-```toml
-[features.code_mode]
-direct_only_tool_namespaces = ["mcp__terminalhook"]
-```
-
-Open a new chat to load the configuration, then call `mcp__terminalhook.run_until` directly and await one result, without a `functions.exec` wrapper. Direct exposure is a host setting; the plugin manifest cannot enforce how tools are exposed. If you install the plugin without running the installer, check this setting. Project configuration can override user settings. Older hosts that do not support it must be updated first. Command execution and waiting do not use Codex CLI.
-
-Desktop evidence collected before the direct-call switch: with 0.3.1 model auditing retained and Stop disabled, the tool call took 120.6039 seconds. During the full 120.169-second command execution interval, the target chat made zero model requests. There was one native call and one result, exit code 0, and 12 complete Chinese output entries on each of stdout and stderr. Model audit records existed both before and after execution. This evidence establishes that call path without a Stop-based wait; it does not guarantee the absence of background requests on every host or version. The default 0.4.0 package no longer includes a model audit hook.
-
-If you retain raw model events and call traces locally, inspect them using `scripts/audit_direct_wait.py <rollout.jsonl> <audit.jsonl>`. By default, it reads command start/end times from `artifacts/desktop-direct-call-markers.json`. Test records are not committed to the source repository.
-
-### Historical hook version
-
-The synchronous Stop hook, background submission, and model audit implementation from 0.3.1 are preserved on the [legacy/stop-hook branch](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook). The current version removes `submit_task`, `prepare_task`, `await_tasks`, `audit_event`, and hook definitions. After upgrading, close the MCP connection in old chats and open a new chat to load the new version.
-
-### Terminal tools
+## Task tools
 
 | Tool | Behavior |
 | --- | --- |
-| `run_until` | Start a command and wait for an output condition; terminate on match/timeout by default, or retain the process |
-| `wait_output` | Continue waiting with a process ID and cursor; replay received data before waiting for new output |
-| `write_input` | Send input and optionally register a wait at the same time, preventing missed immediate responses |
-| `stop_process` | Terminate the managed process tree and wait for cleanup |
+| `check_background` | Verify the existing shared host and originating chat without starting a model turn |
+| `submit_task` | Launch authorized work once under a stable `task_key`; return a durable task ID immediately |
+| `list_tasks` | Explicitly inspect the originating chat's tasks without opening a panel |
+| `get_task` | Inspect a saved result, execution state and delivery receipt for diagnosis |
+| `cancel_task` | Cancel an explicitly selected background task and clean up its process tree |
+| `retry_delivery` | Retry a saved result whose delivery failed before submission; never rerun the command |
+| `watch_tasks` | App-only subscription to the current task’s native state events |
 
-### Avoid model-driven polling
+Call tools directly in the `mcp__terminalhook` namespace. The installer adds this
+namespace to `[features.code_mode].direct_only_tool_namespaces` while preserving
+other settings. A manual plugin installation needs the same host configuration.
+Open a new chat after upgrading so the removed tools disappear from its catalog.
+The name TerminalHook refers to the plugin; current packages use native events
+and host callbacks and do not register Stop or other lifecycle hooks. The historical
+Stop-hook implementation remains on [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook).
 
-For one-shot commands, builds, tests, and CI/CD, make the first `run_until` wait
-for the final outcome or natural exit. Do not return on startup, PR creation,
-`queued`, or `in_progress` messages merely to issue more waits. To await natural
-exit with the current API, supply a specific regex the command will never emit;
-`exited_unmatched` with exit code 0 then establishes successful completion.
-A matched output line alone does not establish command success.
+First call `check_background`. A reachable shared Codex daemon, CLI proxy and
+host-provided `threadId` metadata are required; TerminalHook never guesses a chat
+ID or starts another daemon during preflight. A stdio-only host with no shared
+endpoint cannot submit background work. Windows Desktop has an optional shared
+host launcher described in the [background guide](docs/background-tasks.md).
 
-Choose a timeout for the expected task duration, up to 600000 ms and below the
-client's tool timeout (660 seconds in the package). Local waiting avoids model
-polling within one call; repeated 30- or 60-second calls still cause model round
-trips. Do not split waits solely for periodic progress reports. After a timeout,
-diagnose/report the unresolved state before deciding recovery; do not
-automatically repeat the wait. Work exceeding the per-call limit needs a bounded
-continuation plan with an overall deadline.
-
-Use `wait_output` when a retained process needs a later condition after a genuine
-intermediate action or other useful work, such as checking a running service.
-For input that needs a response, use `write_input` with `wait` in one call.
-These are model-facing usage instructions; the server does not enforce a ban on
-repeated waits, and they do not guarantee a model request count.
-
-### Start and wait
+Then submit the authorized command, for example:
 
 ```json
 {
-  "program": "pwsh",
-  "args": ["-NoProfile", "-Command", "npm run dev"],
-  "cwd": "D:\\Projects\\my-app",
-  "until": [{"name": "ready", "pattern": "Local:\\s+(https?://[^\\s]+)\\s"}],
-  "match_mode": "window",
-  "window_bytes": 65536,
-  "timeout_ms": 300000,
-  "on_match": "keep_running",
-  "on_timeout": "terminate",
-  "env": {"FORCE_COLOR": "0"}
+  "task_key": "build-project-2026-11-17",
+  "program": "sh",
+  "args": ["-c", "./build.sh"],
+  "cwd": "/absolute/path/to/project"
 }
 ```
 
-`program` does not run through an implicit shell. Invoke `pwsh` or `cmd.exe` explicitly for pipes, redirection, and `.cmd` files. `cwd` must be absolute. `env` adds to or overrides the server's inherited environment. Stdin stays open by default for later input; use `write_input` with `eof: true` to send EOF.
+On Windows, use a native executable or `pwsh -NoProfile -Command` with an absolute
+native working directory. For PowerShell UTF-8 output, dot-source the packaged
+`skills/terminal-wait/scripts/Initialize-Utf8.ps1` in that same PowerShell process.
+Commands are argv arrays; explicitly invoke a shell for shell syntax.
 
-The default `mode: "pipe"` reads stdout and stderr separately. `streams` can select either or both. Interactive programs can use `mode: "pty"`, backed by Windows ConPTY or Unix PTYs. `rows` defaults to 24 and `cols` to 120; both accept 1–500. PTY provides only the merged `terminal` output stream, so omit `streams` or set it to `["terminal"]`. The terminal may echo input. On Linux/macOS, use an absolute native working directory such as `/home/me/project` or `/Users/me/project`, and invoke `sh -c` or `bash -lc` explicitly for shell syntax.
+`submit_task` returns `task_id`, `worker_pid`, and `state_dir`. End the turn and
+await delivery to this chat. Do not repeatedly call `get_task` or `list_tasks` to
+wait. Identical retries with the same key reuse the task; changed arguments are
+rejected. A lost submission acknowledgement requires inspecting that task before
+considering any new command. See [background tasks](docs/background-tasks.md).
 
-Chinese input/output and native program pipelines in PowerShell require consistent UTF-8 encoding. The plugin skill includes `scripts/Initialize-Utf8.ps1`. Dot-source it in the target PowerShell session before running the command or script, using its actual installed path:
+## Output, deadlines and recovery
 
-```powershell
-. 'D:/Projects/Codex_Terminalhook/plugins/terminalhook/skills/terminal-wait/scripts/Initialize-Utf8.ps1'
-# Run the target command in the same session, for example:
-$line = [Console]::ReadLine()
-Write-Output ('ACK:' + $line)
-```
+Omit `until` or use `[]` for natural exit. Optional named Rust regex rules stop
+the command on a match; matching a line does not prove a successful natural exit.
+Rules use 1–128 byte unique names, at most 16 rules, 4096-byte patterns and 32
+capture groups. Empty matches, lookaround and backreferences are rejected.
+Default matching is per line; `match_mode: "window"` uses a bounded 64 KiB window
+for multiline matches. `streams` selects `stdout` and/or `stderr`; streams are
+matched independently. Line matching rejects lines exceeding 65536 bytes.
 
-For standalone MCP, you can instead start the `-Command` text with `[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)`. Setting only output encoding does not fix garbled input. Running the initializer in a separate child PowerShell does not configure the parent session. TerminalHook executes `program`/`args` as supplied; callers initialize encoding in the target PowerShell session.
+Output is incrementally decoded as UTF-8, invalid bytes become U+FFFD, ANSI
+CSI/OSC sequences are stripped for matching, and CRLF is normalized. Returned
+output tails are bounded to 4096 bytes per stream; match/capture text shares an
+8192-byte budget. Raw stdout/stderr is retained in per-task rotating logs, capped
+at 2 MiB per file with one backup. Natural-exit tasks without regex conditions
+accept long output without accumulating an unbounded matching buffer.
 
-Example result (some fields omitted):
+Omit `timeout_ms` or use `null` for no execution deadline. A finite deadline is
+1–31536000000 ms and belongs to the independent worker, so work can exceed the
+660-second MCP transport limit. A match, deadline or explicit cancellation cleans
+up the process tree before saving the result. Natural root exit also cleans up
+descendants before draining final output. Windows uses a kill-on-close Job with
+a startup assignment gate; Unix uses a process group. Descendants that deliberately
+create another Unix group/session can escape that containment.
 
-```json
-{
-  "status": "matched",
-  "process_id": "proc_...",
-  "cursor": 512,
-  "latest_cursor": 530,
-  "oldest_cursor": 0,
-  "process_running": true,
-  "exit_code": null,
-  "rule": "ready",
-  "stream": "stdout",
-  "match": "Local: http://localhost:5173/\n",
-  "captures": ["http://localhost:5173/"],
-  "match_output_truncated": false,
-  "output_tail": {"stdout": "...", "stderr": "", "terminal": ""},
-  "log_dir": "C:\\...\\proc_...",
-  "logs_rotated": false
-}
-```
-
-A match establishes that the output condition occurred, not that the command exited successfully. `elapsed_ms` measures the process session lifetime; `wait_elapsed_ms` measures the current wait when a match occurs. `bytes_seen` counts raw output bytes. On Windows, `os_pid` is the Job-managed launcher's PID, not the target application's PID.
-
-### Continue from a cursor
-
-```json
-{
-  "process_id": "proc_...",
-  "cursor": 512,
-  "until": [{"name": "done", "pattern": "Build completed"}],
-  "timeout_ms": 300000
-}
-```
-
-Pass this to `wait_output`. Use the previous result's `cursor`, not `latest_cursor`, which may skip output that has not been consumed. A cursor is a **normalized output byte position** in receive order. It can point inside a single read, so later markers in the same chunk are not skipped. Treat it as opaque; do not calculate cursors or reuse them across processes.
-
-Each process retains the latest 1 MiB of normalized history. If a cursor points into evicted history, the result is `cursor_expired`, with `oldest_cursor`, `latest_cursor`, log paths, and output tails. Data is never skipped silently. Unconsumed output can be replayed after process exit while history remains available. Exited sessions are retained within the connection's most recent 64 sessions; older IDs expire.
-
-### Send input and wait
-
-```json
-{
-  "process_id": "proc_...",
-  "data": "continue\n",
-  "wait": {
-    "until": [{"name": "ack", "pattern": "Accepted"}],
-    "timeout_ms": 30000
-  }
-}
-```
-
-Pass this to `write_input`. The server captures the cursor before sending input, then waits continuously, without requiring the model to write and poll separately. Omitting `wait` returns `written`. Input is limited to 65536 UTF-8 bytes and must include any newline explicitly; PTY typically uses `\r`. In pipe mode, `eof: true` closes stdin after writing. For PTY EOF, send the control characters recognized by the target application.
-
-Input writes wait at most 5 seconds so an application that does not read stdin cannot block the connection indefinitely. A write timeout terminates the process to prevent an incomplete write from unexpectedly taking effect later. Timeout or cancellation while waiting for a response preserves the process. The same applies to `wait_output`.
-
-### Stop
-
-Pass `{"process_id":"proc_..."}` to `stop_process`. An active process returns `stopped`; an already stopped or unknown ID returns `not_running`. Repeated calls are safe.
-
-## Matching and termination semantics
-
-`until` accepts 1–16 named rules. Names must be unique and at most 128 bytes. Rules are selected in array order against the currently matchable text. Patterns use Rust `regex` syntax: lookaround and backreferences are unsupported, and patterns that may match zero width are rejected. Each regex is limited to 4096 bytes, 32 capture groups, and a compiled size of 2 MiB.
-
-| Mode | Matching scope |
-| --- | --- |
-| `line` (default) | Complete lines and the current unfinished line, up to 64 KiB per line; no cross-line matching |
-| `window` | A separate `window_bytes` (256–262144) byte buffer per output stream; supports cross-line matching, excluding text outside the window |
-
-Output is decoded incrementally as UTF-8, replacing invalid bytes with U+FFFD. Other encodings must be converted by the target program. ESC-prefixed ANSI CSI/OSC sequences are removed. CR/LF mark line boundaries, and CRLF becomes one newline. Terminal screen layout after cursor movement is not emulated. Cursor-position queries needed for PTY startup are answered locally without involving the model.
-
-Partial lines are matched immediately, so `$` only means the currently observed line end. Variable-length captures should include an explicit delimiter. To capture a full URL or other newline-terminated value, use `window` mode and include the delimiter in the regex. Returned match text is limited to 4096 bytes; the match and all captures combined are limited to 8192 bytes. Truncation sets `match_output_truncated` to true. Match decisions and cursors still use the full text.
-
-| Status | Meaning |
-| --- | --- |
-| `matched` | A regex matched; `run_until` retains or terminates the process according to `on_match` |
-| `exited_unmatched` | Natural exit with output drained and no match; includes the natural exit code |
-| `timeout` | The wait deadline was reached; `run_until` follows `on_timeout` |
-| `cursor_expired` | Requested history was evicted; diagnose it or explicitly select a new starting point |
-| `error` | A parameter, startup, read, logging, or matching error |
-
-Both `on_match` and `on_timeout` default to `terminate` and also accept `keep_running`. `timeout_ms` defaults to 300000 and accepts 1–600000. The packaged MCP tool timeout is 660 seconds, leaving time for cleanup and transport. Target programs must flush their output; data not written to the pipe or terminal cannot be observed.
-
-Cancelling `run_until` terminates its process. Cancelling a later wait only removes that wait. Closing the connection cleans up all active processes. After the root command exits naturally, descendants still holding pipes are cleaned up before the final output is drained. Windows uses a Job Object with `KILL_ON_JOB_CLOSE`. A local launcher gate ensures the target starts only after Job assignment, eliminating the startup-to-assignment race. Normal cleanup waits for the Job completion port to report `ACTIVE_PROCESS_ZERO`, confirming descendant exit before returning. Failure to confirm within 10 seconds returns an error. If the MCP server is forcibly killed, OS closure of the Job also cleans up descendants.
-
-## Logs and resource limits
-
-Each process continuously writes raw output to `stdout.log`/`stderr.log` or `terminal.log`. Each file is limited to 2 MiB, with one rotated `.log.1` copy. `logs_rotated` indicates that older output may have been evicted. Stdin is not logged, although terminal echo may appear in output.
-
-Default logs live in a connection-specific temporary directory and are deleted on normal disconnect. Temporary logs for evicted sessions are also deleted. To retain logs beyond the session, set an absolute `log_dir` in `run_until`; the server creates a separate process directory inside it. Persistent logs are not deleted automatically. A forced termination may leave temporary logs, which can be cleaned up through normal OS temporary-file management.
-
-Each connection supports at most 8 active processes and 64 sessions. Output uses bounded queues, with at most 1 MiB of history per process and 4096 bytes of returned output tail per stream. Commands retained after a match continue draining output. On Unix, cleanup signals the managed process group; descendants that deliberately create another session/group can escape it. Windows Job cleanup on a forcibly killed server is a Windows-specific guarantee.
-
-The plugin only observes commands it launches and cannot take over Codex's built-in terminal. Native terminal session IDs are not output handles the plugin can subscribe to. Processes, cursors, and temporary logs are valid only within the current MCP connection. They are not guaranteed to persist across connections. The plugin does not automatically intercept every built-in shell call. Its skill guides Codex to use these tools when waiting for output conditions.
-
-## Agent infrastructure
-
-Documentation is maintained in English (the default) and Simplified Chinese;
-agent workflow skills and scripts use English. The repository includes the
-`terminalhook-development` project skill and a helper for installing
-`terminal-wait` into a standalone MCP consumer project. See
-[Agent workflows and project skills](docs/agent-workflows.md) for setup,
-invocation, updates, and verification.
+Execution and delivery have separate states. A natural result has `status: "exited"`
+and the actual `exit_code`; nonzero exits mark the task failed. There are no
+connection-local process handles or output cursors. Delivery failure preserves the
+saved result; use `retry_delivery` only after diagnosing a failure before submission.
+An uncertain delivery requires reconciling the original chat instead of replaying it.
+Workers survive MCP disconnect, but execution is not resumed after a reboot or
+worker failure. The dashboard's native state subscriptions do not poll the model.
+Closing the panel does not stop work or lose completion delivery.
 
 ## Verification
 
-```powershell
+```sh
+npm ci
+npm run check:ui
+npm run build:ui
+cargo fmt --check
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo build --locked
-python -m unittest discover -s tests -v
-
-# Protocol regressions exceeding the default 60-second client timeout
-$env:TERMINALHOOK_LONG_WAIT = '1'
-python -m unittest discover -s tests -v
-
-# Run the standalone 90-second PowerShell Chinese-text task;
-# save its summary and raw logs under artifacts/
-python -m unittest discover -s tests -k powershell_utf8_long_wait -v
-
-# Extract the release ZIP, run the installer, and test the cached binary
-# in an isolated Codex directory
-python scripts/verify_plugin.py
-
-# Test local-to-Git migration, startup auto-update, and the official upgrade command
-# with a loopback Git server and an isolated Codex home
-python scripts/verify_git_marketplace.py
-
-# Extract the release ZIP and verify the hook-free manifest and binary protocol
-python scripts/verify_package.py
-
-# After release validation, compare source, ZIP, installed cache, and acceptance records
-python scripts/audit_release.py
+python3 -m unittest discover -s tests -v
+npx playwright install chromium
+npm run test:ui
+python3 scripts/package.py --channel development
+python3 scripts/verify_package.py
+python3 scripts/verify_long_wait.py
 ```
 
-Protocol tests use only the Python 3 standard library. Installation verification uses Python 3.11+ `tomllib` and checks the installer, cached binary, and idempotent configuration updates in an isolated Codex directory without starting a model. Verify the desktop call path in an actual app chat; protocol tests cannot establish host model request counts. Historical CLI verification scripts are optional development diagnostics, not the default plugin runtime or desktop acceptance procedure.
+Protocol regressions prove that only background tools are discoverable and all
+four removed names fail direct calls. They exercise detached completion, chat
+isolation, idempotency, matching, UTF-8, logs, process cleanup and delivery recovery
+using an independent loopback host fixture without model turns. Release additionally
+requires a 65-second task across MCP disconnection, 90-second UTF-8 output and
+Windows PowerShell UTF-8 output. Native desktop rendering and actual host delivery
+remain separate integration checks; fixture evidence does not establish them.
+Installation and Git marketplace checks use isolated Codex homes. Detailed gates,
+coverage, mutation and performance checks are in [Development and releases](docs/releasing.md).
 
 ## Implementation references
 
 - [Codex plugin format and marketplaces](https://developers.openai.com/plugins/build/plugins)
-- [Codex MCP configuration and timeouts](https://learn.chatgpt.com/docs/extend/mcp)
 - [Official Rust MCP SDK](https://github.com/modelcontextprotocol/rust-sdk)
-- [portable-pty / ConPTY](https://docs.rs/portable-pty/latest/portable_pty/)
