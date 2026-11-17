@@ -185,7 +185,11 @@ impl ServerHandler for TerminalHook {
             return Ok(match result {
                 Ok(value) => CallToolResult::structured(value),
                 Err(message) => {
-                    CallToolResult::structured_error(json!({"status":"error","message":message}))
+                    let mut detail = json!({"status":"error","message":message});
+                    if message == background::TASK_CHAT_MISMATCH {
+                        detail["code"] = json!("task_chat_mismatch");
+                    }
+                    CallToolResult::structured_error(detail)
                 }
             }
             .into());

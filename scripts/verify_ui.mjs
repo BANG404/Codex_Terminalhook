@@ -6,6 +6,7 @@ import path from "node:path";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { verifyStartup } from "./verify_ui_startup.mjs";
+import { verifyFork } from "./verify_ui_fork.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { chromium } = await import(
@@ -281,6 +282,13 @@ try {
   assert.ok(calls.includes("ui/notifications/initialized"));
   assert.ok(!calls.includes("ui/message"));
   await verifyStartup(browser, html);
+  const denied = await rpc("tools/call", { name: "get_task",
+    arguments: { task_id: submitted.task_id },
+    _meta: { threadId: "01a1e361-731f-7020-8ba1-5fb700728b78" },
+  });
+  assert.equal(denied.isError, true);
+  assert.equal(denied.structuredContent.code, "task_chat_mismatch");
+  await verifyFork(browser, html, denied);
   const evidence = {
     passed: true,
     actual_mcp_resource: true,
@@ -288,6 +296,7 @@ try {
     current_task_only: true,
     no_list_calls_or_list_controls: true,
     startup_callback_orderings: true,
+    forked_task_notice_and_no_retry: true,
     native_worker_event_updates: true,
     unrelated_tasks_ignored: true,
     timeout_callback_renews_without_refresh: true,
