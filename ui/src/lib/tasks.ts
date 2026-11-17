@@ -1,5 +1,6 @@
 export interface Task {
   task_id: string;
+  revision?: string;
   task_key?: string;
   program?: string;
   cwd?: string;
@@ -23,16 +24,7 @@ interface Output {
   stdout?: string;
   stderr?: string;
 }
-export interface TaskList {
-  tasks?: Task[];
-  truncated?: boolean;
-  revision?: string;
-}
-export type TaskUpdate = TaskList & Partial<Task>;
-export const isActive = (task: Task) =>
-  ["queued", "submitted", "running"].includes(task.status);
-export const needsAttention = (task: Task) =>
-  ["failed", "uncertain", "sending"].includes(task.delivery);
+export type TaskUpdate = Partial<Task> & { tasks?: unknown[] };
 export const isFailure = (value: string) =>
   [
     "failed",

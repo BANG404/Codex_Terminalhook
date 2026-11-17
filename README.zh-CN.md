@@ -79,11 +79,11 @@ codex plugin marketplace remove terminalhook-local
 | --- | --- |
 | `check_background` | 验证现有共享宿主及原聊天，不启动模型回合 |
 | `submit_task` | 使用稳定 `task_key` 启动一次已授权工作，立即返回持久任务 ID |
-| `list_tasks` | 打开原聊天的事件驱动 MCP Apps 任务面板 |
+| `list_tasks` | 明确查询原聊天的任务，不打开面板 |
 | `get_task` | 按需诊断已保存结果、执行状态和交付回执 |
 | `cancel_task` | 取消明确选择的后台任务，清理其进程树 |
 | `retry_delivery` | 仅重试提交前交付失败的已保存结果，不重新执行命令 |
-| `watch_tasks` | 仅面板可见的原生事件订阅，状态变化时返回新快照 |
+| `watch_tasks` | 仅面板可见，订阅当前任务的原生状态事件 |
 
 直接调用 `mcp__terminalhook` 命名空间下的工具。安装器将其加入
 `[features.code_mode].direct_only_tool_namespaces` 并保留其他设置；手动安装插件时也需配置宿主。

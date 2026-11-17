@@ -60,7 +60,7 @@ export class HostBridge {
     this.theme(result.hostContext?.theme);
     this.post({ method: "ui/notifications/initialized", params: {} });
   }
-  async tool<T>(name: "list_tasks" | "get_task" | "watch_tasks", args: object = {}) {
+  async tool<T>(name: "get_task" | "watch_tasks", args: object = {}) {
     return data<T>(
       await this.rpc<ToolResult>("tools/call", { name, arguments: args }, name === "watch_tasks" ? 600000 : 20000),
     );
@@ -87,7 +87,10 @@ export class HostBridge {
         : entry.resolve(message.result);
     } else if (message.method === "ui/notifications/host-context-changed")
       this.theme(message.params?.theme);
-    else if (message.method === "ui/notifications/tool-result") {
+    else if (message.method === "ui/notifications/tool-input") {
+      const task_id = message.params?.arguments?.task_id;
+      if (typeof task_id === "string") this.onTasks({ task_id });
+    } else if (message.method === "ui/notifications/tool-result") {
       // Some hosts echo cancelled app requests. Transport renewal is silent.
       if (message.params?.isError && message.params?.structuredContent?.message === "Task event subscription cancelled") return;
       try {

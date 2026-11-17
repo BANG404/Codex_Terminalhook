@@ -146,6 +146,7 @@ try {
   await page.evaluate((submitted) => {
     window.hostCalls = [];
     window.toolCalls = [];
+    window.toolArgs = [];
     window.sizes = [];
     window.addEventListener("message", async (event) => {
       const frame = document.querySelector("iframe");
@@ -161,7 +162,7 @@ try {
       let result;
       if (message.method === "ui/initialize") {
         // Opening submit_task's resource delivers the single-task result before
-        // initialization finishes. It is not a list snapshot or watch cursor.
+        // initialization finishes. Its task ID scopes the first detail read.
         frame.contentWindow.postMessage(
           { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: { structuredContent: submitted } },
           "*",
@@ -174,15 +175,8 @@ try {
       } else if (message.method === "tools/call") {
         const { name, arguments: args } = message.params;
         window.toolCalls.push(name);
-        if (name === "watch_tasks" && window.fixture) return;
-        result = window.fixture
-          ? {
-              structuredContent:
-                name === "list_tasks"
-                  ? { tasks: window.fixture.tasks }
-                  : window.fixture.details[args.task_id],
-            }
-          : await window.callMcp(name, args, message.id);
+        window.toolArgs.push(args);
+        result = await window.callMcp(name, args, message.id);
       } else return;
       frame.contentWindow.postMessage(
         { jsonrpc: "2.0", id: message.id, result },
@@ -190,7 +184,7 @@ try {
       );
       // Hosts may echo app-initiated calls as callbacks too. These must not
       // cause a list/get/list feedback loop.
-      if (message.method === "tools/call" && !window.noEcho)
+      if (message.method === "tools/call")
         frame.contentWindow.postMessage(
           {
             jsonrpc: "2.0",
@@ -220,268 +214,86 @@ try {
       params,
     );
   }
-  await frame.getByRole("button", { name: /dashboard-verification/ }).waitFor();
-  await frame.locator('#detail[aria-busy="false"] pre').waitFor();
-  assert.equal(await frame.locator('.task-row[aria-pressed="true"]').evaluate(row => getComputedStyle(row).boxShadow), "none");
-  assert.equal(
-    await frame.locator("header, h1, select, [role=switch]").count(),
-    0,
-  );
-  assert.equal(
-    await frame.getByRole("button", { name: /Refresh|Retry/i }).count(),
-    0,
-  );
+  await frame.locator(".detail-heading strong").filter({hasText: "dashboard-verification"}).waitFor();
+  assert.equal(await frame.locator(".task-list, .task-row, [role=tab], input, header, h1, select, [role=switch]").count(), 0);
   assert.equal(await frame.locator("html").getAttribute("lang"), "en");
-  // The native worker event subscription updates the panel without an injected
-  // tool-result notification or a periodic list request.
-  await frame.locator('.task-row[aria-pressed="true"] .status-badge').filter({hasText: "completed"}).waitFor();
+  // Native state/result events must update this task without list reads.
+  await frame.locator(".task-badges .status-badge").filter({hasText: "completed"}).waitFor();
   await frame.locator("#detail pre").filter({hasText: "Build finished"}).waitFor();
   await frame.getByLabel("Delivery: delivered", {exact: true}).waitFor();
-  await frame.locator('#detail[aria-busy="false"]').waitFor();
-  await frame.locator("main").screenshot({path:path.join(root,"artifacts/dashboard-completed.png")});
-  const subscriptions = await page.evaluate(() => window.toolCalls.filter(name => name === "watch_tasks").length);
-  await frame.locator("body").evaluate(() => window.expireTaskSubscription());
-  await page.waitForFunction(count => window.toolCalls.filter(name => name === "watch_tasks").length > count, subscriptions);
-  const later = (await tool("submit_task", {
-    task_key: "dashboard-after-timeout", program: process.env.TERMINALHOOK_TEST_PYTHON || "python3",
-    args: ["-u", "-c", "import time;time.sleep(2);print('After timeout completed')"], cwd: root,
-  })).structuredContent;
-  assert.equal(later.status, "submitted");
-  const renewedRow = frame.getByRole("button", {name: /dashboard-after-timeout completed/});
-  await renewedRow.waitFor();
-  await renewedRow.getByLabel("Delivery: delivered", {exact:true}).waitFor();
-  await frame.locator('#detail[aria-busy="false"]').waitFor();
-  const callsAfterCompletion = await page.evaluate(() => window.toolCalls.length);
-  // Longer than the former three-second refresh interval: no background calls.
-  await page.waitForTimeout(4200);
-  assert.equal(
-    await page.evaluate(() => window.toolCalls.length),
-    callsAfterCompletion,
-  );
-  await frame.locator("body").evaluate((body) => {
-    for (const hidden of [true, false]) {
-      Object.defineProperty(body.ownerDocument, "hidden", {
-        configurable: true,
-        value: hidden,
-      });
-      body.ownerDocument.dispatchEvent(new Event("visibilitychange"));
-    }
-  });
-  const actual = (await tool("get_task", { task_id: submitted.task_id }))
-    .structuredContent;
+  const actual = (await tool("get_task", { task_id: submitted.task_id })).structuredContent;
   assert.equal(actual.status, "completed");
-  await notify({ structuredContent: actual });
-  await frame
-    .locator("#detail pre")
-    .filter({ hasText: "Build finished" })
-    .waitFor();
-  assert.equal(
-    await page.evaluate(() => window.toolCalls.length),
-    callsAfterCompletion,
-  );
   assert.equal(await frame.locator("#detail pre img").count(), 0);
-  assert.match(
-    await frame.locator("#detail pre").innerText(),
-    /<img src=x onerror=alert\(1\)>/,
-  );
+  assert.match(await frame.locator("#detail pre").innerText(), /<img src=x onerror=alert\(1\)>/);
   await frame.getByRole("button", { name: "Details", exact: true }).click();
   await frame.getByText("No deadline", { exact: true }).waitFor();
   await frame.getByRole("button", { name: "Details", exact: true }).click();
-  await frame
-    .getByRole("textbox", { name: "Find a task…" })
-    .fill("does-not-exist");
-  await frame.getByText("No matching tasks", { exact: true }).waitFor();
-  await frame.getByRole("button", { name: "Clear search" }).click();
+
+  const subscriptions = await page.evaluate(() => window.toolCalls.filter(name => name === "watch_tasks").length);
+  await frame.locator("body").evaluate(() => window.expireTaskSubscription());
+  await page.waitForFunction(count => window.toolCalls.filter(name => name === "watch_tasks").length > count, subscriptions);
+  const callsAfterRenewal = await page.evaluate(() => window.toolCalls.length);
+  const later = (await tool("submit_task", {
+    task_key: "unrelated-task", program: process.env.TERMINALHOOK_TEST_PYTHON || "python3",
+    args: ["-u", "-c", "print('Unrelated task finished')"], cwd: root,
+  })).structuredContent;
+  assert.equal(later.status, "submitted");
+  await notify({ structuredContent: later });
+  await notify({ structuredContent: {tasks: [later], revision: "ffffffffffffffff"} });
+  await notify({ structuredContent: {tasks: []} });
+  // Exceeds the former refresh period; unrelated state writes do not wake the card.
+  await page.waitForTimeout(4200);
+  await frame.locator("body").evaluate((body) => {
+    for (const hidden of [true, false]) {
+      Object.defineProperty(body.ownerDocument, "hidden", { configurable: true, value: hidden });
+      body.ownerDocument.dispatchEvent(new Event("visibilitychange"));
+    }
+  });
+  await notify({ structuredContent: actual });
+  assert.equal(await page.evaluate(() => window.toolCalls.length), callsAfterRenewal);
+  await frame.locator("#detail pre").filter({hasText: "Build finished"}).waitFor();
+  assert.equal(await frame.getByText("unrelated-task", {exact: true}).count(), 0);
+  assert.ok((await page.evaluate(() => window.toolArgs)).every(args => args.task_id === submitted.task_id));
+  assert.ok(!(await page.evaluate(() => window.toolCalls)).includes("list_tasks"));
   const desktopSize = await frame.locator("main").boundingBox();
   assert.ok(desktopSize.height <= 340, `desktop height: ${desktopSize.height}`);
-  await page.waitForFunction(() =>
-    window.sizes.some((size) => size.height < 360),
-  );
-
-  // Exercise dense lists, attention, failures and empty state with deterministic
-  // host responses after verifying the actual embedded resource and task tools.
-  const fixture = { tasks: [], details: {} };
-  for (let index = 0; index < 12; index++) {
-    const task = {
-      task_id: `fixture-${index}`,
-      task_key:
-        ["build-release", "integration-tests", "lint-checks"][index % 3] +
-        (index >= 3 ? `-${index}` : ""),
-      program: index % 2 ? "cargo test --locked" : "npm run build",
-      cwd: root,
-      status: index === 0 ? "running" : index === 1 ? "failed" : "completed",
-      delivery:
-        index === 0 ? "pending" : index === 1 ? "uncertain" : "delivered",
-      timeout_ms: null,
-    };
-    fixture.tasks.push(task);
-    fixture.details[task.task_id] = {
-      ...actual,
-      ...task,
-      result: {
-        exit_code: index === 0 ? null : index === 1 ? 1 : 0,
-        elapsed_ms: 1420,
-        output_tail: {
-          stdout:
-            "✓ Compiling terminalhook\n✓ Checking native targets\n✓ Build finished 中文\n" +
-            Array(40).fill("Verification output").join("\n"),
-        },
-      },
-      delivery_error:
-        index === 1 ? "Delivery receipt needs verification" : undefined,
-    };
-  }
-  await page.evaluate((fixture) => {
-    window.fixture = structuredClone(fixture);
-    window.fixture.details[fixture.tasks[0].task_id].status = "completed";
-    window.noEcho = true;
-  }, fixture);
-  await notify({ structuredContent: { tasks: fixture.tasks } });
-  await frame.getByRole("button", { name: /build-release completed/ }).waitFor();
-  await page.evaluate((fixture) => {
-    window.noEcho = false;
-    window.fixture = fixture;
-  }, fixture);
-  await notify({ structuredContent: { tasks: fixture.tasks } });
-  await frame.getByRole("button", { name: /build-release running/ }).waitFor();
-  assert.equal(await frame.locator(".task-row").count(), 12);
-  await frame.getByRole("tab", { name: /Active/ }).click();
-  assert.equal(await frame.locator(".task-row").count(), 1);
-  assert.notEqual(
-    await frame
-      .getByRole("tab", { name: /Active/ })
-      .evaluate((element) => getComputedStyle(element).backgroundColor),
-    "rgba(0, 0, 0, 0)",
-  );
-  await frame.getByRole("tab", { name: /Active/ }).press("ArrowRight");
-  await frame.getByRole("tab", { name: /Attention/, selected: true }).waitFor();
-  await frame.getByRole("tab", { name: /Attention/ }).click();
-  await frame.getByRole("button", { name: /integration-tests/ }).click();
-  await frame
-    .getByRole("alert")
-    .filter({ hasText: "Delivery receipt" })
-    .waitFor();
-  assert.equal(await frame.locator(".task-row").count(), 1);
-  await frame.getByRole("tab", { name: /All/ }).click();
-  await frame.getByRole("button", { name: /build-release running/ }).click();
-  await frame.locator('#detail[aria-busy="false"] pre').waitFor();
-  const callsBeforeError = await page.evaluate(() => window.toolCalls.length);
-  await notify({
-    isError: true,
-    content: [{ type: "text", text: "Host unavailable" }],
-  });
-  await frame
-    .getByRole("status")
-    .filter({ hasText: "Host unavailable" })
-    .waitFor();
-  assert.equal(await frame.locator(".task-row").count(), 12);
-  await notify({ structuredContent: fixture.details["fixture-0"] });
-  await frame.getByRole("status").filter({ hasText: "Updated" }).waitFor();
-  assert.equal(
-    await page.evaluate(() => window.toolCalls.length),
-    callsBeforeError,
-  );
-  await frame.locator("main").screenshot({
-    path: path.join(root, "artifacts/task-dashboard.png"),
-  });
-  await page.evaluate(() =>
-    document.querySelector("iframe").contentWindow.postMessage(
-      {
-        jsonrpc: "2.0",
-        method: "ui/notifications/host-context-changed",
-        params: { theme: "dark" },
-      },
-      "*",
-    ),
-  );
+  await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard.png")});
+  await page.evaluate(() => document.querySelector("iframe").contentWindow.postMessage({
+    jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: {theme: "dark"},
+  }, "*"));
   await frame.locator("html.dark").waitFor();
-  await frame
-    .locator("main")
-    .screenshot({ path: path.join(root, "artifacts/task-dashboard-dark.png") });
+  await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard-dark.png")});
   await page.setViewportSize({ width: 360, height: 800 });
   const mobileSize = await frame.locator("main").boundingBox();
-  assert.ok(mobileSize.height <= 480, `mobile height: ${mobileSize.height}`);
+  assert.ok(mobileSize.height <= 340, `mobile height: ${mobileSize.height}`);
   assert.ok(mobileSize.width <= 324, `mobile width: ${mobileSize.width}`);
-  assert.ok(
-    await frame
-      .locator("body")
-      .evaluate((body) => body.scrollWidth <= body.clientWidth),
-  );
-  await frame.locator("main").screenshot({
-    path: path.join(root, "artifacts/task-dashboard-mobile.png"),
-  });
-  await page.evaluate(() => {
-    window.fixture.tasks = [];
-  });
-  const beforeSubmission = await page.evaluate(() => window.toolCalls.length);
-  await notify({
-    structuredContent: {
-      task_id: "new-task",
-      status: "submitted",
-      delivery: "pending",
-    },
-  });
-  await frame.getByRole("button", { name: /new-task submitted/ }).waitFor();
-  assert.equal(
-    await page.evaluate(() => window.toolCalls.length),
-    beforeSubmission,
-  );
-  await notify({ structuredContent: { tasks: [] } });
-  await frame.getByText("No tasks yet", { exact: true }).waitFor();
-  assert.equal(await frame.locator("#detail pre").count(), 0);
-  // Save a host preview for manual CLI inspection, using fixture data only.
-  const preview = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TerminalHook compact dashboard preview</title><style>body{margin:0;padding:20px;background:#f4f5f6}iframe{display:block;width:100%;max-width:900px;margin:auto;border:0}</style></head><body><iframe title="TerminalHook preview"></iframe><script>
-    const fixture=${JSON.stringify(fixture).replaceAll("<", "\\u003c")};
-    addEventListener('message',event=>{const frame=document.querySelector('iframe'),m=event.data;if(event.source!==frame.contentWindow)return;if(m.method==='ui/notifications/size-changed')frame.style.height=m.params.height+'px';if(m.id==null)return;const result=m.method==='ui/initialize'?{hostContext:{theme:'light'}}:m.method==='tools/call'?{structuredContent:m.params.name==='list_tasks'?{tasks:fixture.tasks}:fixture.details[m.params.arguments.task_id]}:{};frame.contentWindow.postMessage({jsonrpc:'2.0',id:m.id,result},'*')});
-    document.querySelector('iframe').srcdoc=${JSON.stringify(html).replaceAll("<", "\\u003c")};
-  </script></body></html>`;
-  await writeFile(path.join(root, "artifacts/dashboard-preview.html"), preview);
-  await page.evaluate(() =>
-    document
-      .querySelector("iframe")
-      .contentWindow.postMessage(
-        { jsonrpc: "2.0", id: 998, method: "ui/resource-teardown", params: {} },
-        "*",
-      ),
-  );
+  assert.ok(await frame.locator("body").evaluate(body => body.scrollWidth <= body.clientWidth));
+  await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard-mobile.png")});
+  await page.evaluate(() => document.querySelector("iframe").contentWindow.postMessage({
+    jsonrpc: "2.0", id: 998, method: "ui/resource-teardown", params: {},
+  }, "*"));
+  const callsAtTeardown = await page.evaluate(() => window.toolCalls.length);
+  await notify({ structuredContent: {...actual, status: "failed"} });
+  assert.equal(await page.evaluate(() => window.toolCalls.length), callsAtTeardown);
+  assert.equal(requests.filter(url => /^https?:/.test(url)).length, 0);
   assert.deepEqual(errors, []);
-  assert.deepEqual(
-    requests.filter((url) => /^https?:/.test(url)),
-    [],
-  );
   const calls = await page.evaluate(() => window.hostCalls);
-  assert.equal(calls[0], "ui/initialize");
   assert.ok(calls.includes("ui/notifications/initialized"));
   assert.ok(!calls.includes("ui/message"));
-  assert.equal(
-    await page.evaluate(
-      () => window.toolCalls.filter((name) => name === "list_tasks").length,
-    ),
-    1,
-  );
-  assert.deepEqual(
-    [...new Set(await page.evaluate(() => window.toolCalls))].sort(),
-    ["get_task", "list_tasks", "watch_tasks"],
-  );
   await verifyStartup(browser, html);
   const evidence = {
     passed: true,
     actual_mcp_resource: true,
     actual_task_tools: true,
-    submit_result_before_initialize: true,
+    current_task_only: true,
+    no_list_calls_or_list_controls: true,
     startup_callback_orderings: true,
-    english_only: true,
-    no_header_or_refresh_controls: true,
-    no_idle_or_visibility_polling: true,
-    callback_updates: true,
     native_worker_event_updates: true,
+    unrelated_tasks_ignored: true,
     timeout_callback_renews_without_refresh: true,
-    no_selected_row_border: true,
+    no_idle_or_visibility_polling: true,
     callback_echo_no_loop: true,
-    filtering: true,
     details_collapse: true,
-    callback_error_recovery: true,
-    removed_selection_cleared: true,
     host_theme: true,
     compact_desktop_height: desktopSize.height,
     compact_mobile_height: mobileSize.height,
@@ -490,10 +302,7 @@ try {
     model_messages: 0,
     host: "Playwright MCP Apps bridge simulation; not native desktop rendering",
   };
-  await writeFile(
-    path.join(root, "artifacts/ui-validation.json"),
-    JSON.stringify(evidence, null, 2),
-  );
+  await writeFile(path.join(root, "artifacts/ui-validation.json"), JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence));
 } finally {
   if (browser) await browser.close();

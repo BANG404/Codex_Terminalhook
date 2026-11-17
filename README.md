@@ -85,11 +85,11 @@ codex plugin marketplace remove terminalhook-local
 | --- | --- |
 | `check_background` | Verify the existing shared host and originating chat without starting a model turn |
 | `submit_task` | Launch authorized work once under a stable `task_key`; return a durable task ID immediately |
-| `list_tasks` | Open the originating chat's event-driven MCP Apps task dashboard |
+| `list_tasks` | Explicitly inspect the originating chat's tasks without opening a panel |
 | `get_task` | Inspect a saved result, execution state and delivery receipt for diagnosis |
 | `cancel_task` | Cancel an explicitly selected background task and clean up its process tree |
 | `retry_delivery` | Retry a saved result whose delivery failed before submission; never rerun the command |
-| `watch_tasks` | App-only subscription that returns a new snapshot on native state events |
+| `watch_tasks` | App-only subscription to the current task’s native state events |
 
 Call tools directly in the `mcp__terminalhook` namespace. The installer adds this
 namespace to `[features.code_mode].direct_only_tool_namespaces` while preserving

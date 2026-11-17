@@ -1,14 +1,7 @@
 export const labels = {
-  title: "Background tasks",
-  all: "All",
-  active: "Active",
-  attention: "Attention",
-  tasks: "Tasks in this chat",
+  title: "Background task",
   details: "Details",
-  search: "Find a task…",
-  empty: "No tasks yet",
-  noMatch: "No matching tasks",
-  select: "Select a task",
+  select: "Waiting for this tool’s task…",
   connecting: "Connecting…",
   standalone: "Open in an MCP Apps host",
   updated: "Updated",
@@ -24,7 +17,6 @@ export const labels = {
   id: "Task ID",
   cwd: "Directory",
   receipt: "Delivery turn",
-  truncated: "First 100 tasks",
   loading: "Loading…",
 };
 

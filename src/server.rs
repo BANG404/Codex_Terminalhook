@@ -59,7 +59,7 @@ impl TerminalHook {
             ),
             Tool::new(
                 "list_tasks",
-                "Show the background task dashboard for the calling chat. Lists execution and delivery state without launching tasks or a model turn. UI refreshes call this tool directly.",
+                "List background tasks for explicit inspection of the calling chat. Does not open a UI or launch tasks or a model turn.",
                 json!({"type":"object","properties":{},"additionalProperties":false})
                     .as_object()
                     .unwrap()
@@ -67,7 +67,7 @@ impl TerminalHook {
             ),
             Tool::new(
                 "watch_tasks",
-                "App-only task subscription. Wait for a native filesystem state event after a list revision; no timer, polling, command launch, or model turn.",
+                "App-only task subscription. Supply task_id and its revision to watch only the current task through native filesystem events; no timer, polling, command launch, or model turn.",
                 schemars::schema_for!(WatchTasksRequest)
                     .as_object()
                     .unwrap()
@@ -100,7 +100,7 @@ impl TerminalHook {
                     tool
                 } else if matches!(
                     tool.name.as_ref(),
-                    "submit_task" | "get_task" | "list_tasks"
+                    "submit_task" | "get_task" | "cancel_task" | "retry_delivery"
                 ) {
                     crate::ui::attach(tool)
                 } else {

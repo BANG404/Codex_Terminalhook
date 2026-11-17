@@ -121,6 +121,11 @@ class McpContractTests(unittest.TestCase):
             "cancel_task", "retry_delivery", "watch_tasks"})
         watch = next(tool for tool in tools if tool["name"] == "watch_tasks")
         self.assertEqual(watch["_meta"]["ui"]["visibility"], ["app"])
+        for tool in tools:
+            if tool["name"] in ("submit_task", "get_task", "cancel_task", "retry_delivery"):
+                self.assertEqual(tool["_meta"]["ui"]["resourceUri"], "ui://terminalhook/tasks.html")
+            elif tool["name"] == "list_tasks":
+                self.assertNotIn("_meta", tool)
         submit = next(tool for tool in tools if tool["name"] == "submit_task")
         self.assertFalse(submit["inputSchema"].get("additionalProperties", True))
         self.assertNotIn("mode", submit["inputSchema"]["properties"])
