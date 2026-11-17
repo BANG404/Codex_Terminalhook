@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [alpha, beta, rc, main]
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize]
   workflow_dispatch:
     inputs:
       build_package:
@@ -35,6 +35,7 @@ jobs:
   policy:
     name: Source and promotion policy
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.mode.outputs.full }}
       matrix: ${{ steps.mode.outputs.matrix }}
@@ -70,9 +71,35 @@ jobs:
           path: artifacts/promotion-validation.json
           if-no-files-found: error
 
+  frontend:
+    name: Shared dashboard bundle
+    needs: policy
+    if: needs.policy.outputs.full == 'true' || inputs.build_package == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install, check and build the dashboard once
+        run: python scripts/dashboard.py build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dashboard-bundle
+          path: ui/dist/
+          if-no-files-found: error
+          retention-days: 14
+
   test:
     name: Native tests (${{ matrix.platform }})
-    needs: policy
+    needs: [policy, frontend]
     if: needs.policy.outputs.full == 'true'
     strategy:
       fail-fast: false
@@ -89,8 +116,28 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: matrix.platform == 'linux-x64'
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Restore native Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
       - name: Verify native host identity
         run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dashboard-bundle
+          path: ui/dist
+      - name: Verify the shared dashboard source and checksum
+        run: python scripts/dashboard.py verify
       - name: Check Rust formatting
         run: cargo fmt --check
       - name: Check Rust lints
@@ -101,28 +148,59 @@ jobs:
         run: cargo build --locked
       - name: Protocol and release policy tests
         run: python -m unittest discover -s tests -v
+      - name: Install dashboard browser test dependencies
+        if: matrix.platform == 'linux-x64'
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Verify dashboard through real MCP tools
+        if: matrix.platform == 'linux-x64'
+        run: npm run test:ui
+      - name: Upload dashboard verification
+        if: always() && matrix.platform == 'linux-x64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dashboard-verification
+          path: |
+            artifacts/task-dashboard.png
+            artifacts/ui-validation.json
+          if-no-files-found: ignore
+
+  assurance:
+    needs: [policy, frontend]
+    if: ${{ !cancelled() && needs.policy.result == 'success' && (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') }}
+    uses: ./.github/workflows/assurance.yml
+    with:
+      coverage: ${{ needs.policy.outputs.full == 'true' }}
+      deep: ${{ inputs.long_wait == true && inputs.build_package == true }}
+      dashboard_artifact: ${{ needs.frontend.result == 'success' && 'dashboard-bundle' || '' }}
 
   quality:
     name: Quality checks
     if: always()
-    needs: [policy, test]
+    needs: [policy, frontend, test, assurance]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       POLICY: ${{ needs.policy.result }}
       TEST: ${{ needs.test.result }}
+      ASSURANCE: ${{ needs.assurance.result }}
+      FRONTEND: ${{ needs.frontend.result }}
       FULL: ${{ needs.policy.outputs.full }}
+      PACKAGE: ${{ needs.policy.outputs.full == 'true' || inputs.build_package == true }}
     steps:
       - name: Require policy and every native test
         run: |
           test "$POLICY" = success
+          test "$ASSURANCE" = success
+          if [ "$PACKAGE" = true ]; then test "$FRONTEND" = success; else test "$FRONTEND" = skipped; fi
           if [ "$FULL" = true ]; then test "$TEST" = success; else test "$TEST" = skipped; fi
 
   build:
     name: Native package (${{ matrix.platform }})
-    needs: [policy, quality]
-    # CD reuses source tests, so its test job is intentionally skipped. Override
-    # implicit success() propagation while still requiring successful real gates.
-    if: ${{ !cancelled() && needs.policy.result == 'success' && needs.quality.result == 'success' && (needs.policy.outputs.full == 'true' || inputs.build_package == true) }}
+    needs: [policy, frontend]
+    # Build alongside native tests. Package verification still requires quality.
+    if: ${{ !cancelled() && needs.policy.result == 'success' && needs.frontend.result == 'success' && (needs.policy.outputs.full == 'true' || inputs.build_package == true) }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.policy.outputs.matrix) }}
@@ -138,10 +216,26 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Restore native Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
       - name: Verify native host identity
         run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dashboard-bundle
+          path: ui/dist
       - name: Build the exact source with its channel version
-        run: python scripts/package.py
+        run: python scripts/package.py --prebuilt-dashboard
       - name: Exercise the final packaged binary
         run: python scripts/verify_package.py
       - name: Install the pinned Codex CLI
@@ -153,6 +247,14 @@ jobs:
       - name: Explicit release long-wait regressions
         if: inputs.long_wait == true && inputs.build_package == true
         run: python scripts/verify_long_wait.py
+      - name: Verify the final release dashboard through MCP
+        if: matrix.platform == 'linux-x64' && inputs.long_wait == true && inputs.build_package == true
+        env:
+          TERMINALHOOK_EXE: ${{ github.workspace }}/dist/package/plugins/terminalhook/bin/terminalhook
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run test:ui
       - name: Stage verification evidence with the native archive
         run: python -c "from pathlib import Path; import shutil; [shutil.copyfile(Path('artifacts') / n, Path('dist') / n) for n in ('package-validation.json', 'git-marketplace-validation.json')]"
       - name: Upload the verified native distribution
@@ -181,6 +283,7 @@ jobs:
     if: always()
     needs: [policy, quality, build]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     env:
       QUALITY: ${{ needs.quality.result }}
       BUILD: ${{ needs.build.result }}

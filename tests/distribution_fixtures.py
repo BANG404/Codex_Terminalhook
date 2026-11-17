@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from distribution import PLATFORMS, archive_name, binary_name, expected_files, git_mode, mcp_config
+from distribution import PLATFORMS, archive_name, binary_name, desktop_host_binary_name, expected_files, git_mode, mcp_config
 sys.path.pop(0)
 
 
@@ -21,6 +21,7 @@ def package_data(info, target="windows-x64"):
     files["plugins/terminalhook/.mcp.json"] = json.dumps(mcp_config(target)).encode()
     magic = b"MZ" if target.startswith("windows") else b"\x7fELF" if target.startswith("linux") else b"\xcf\xfa\xed\xfe"
     files["plugins/terminalhook/bin/" + binary_name(target)] = magic + b" verified binary"
+    files["plugins/terminalhook/bin/" + desktop_host_binary_name(target)] = magic + b" verified desktop host"
     return files
 
 

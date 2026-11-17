@@ -5,10 +5,10 @@ const LOG_LIMIT: usize = 2 * 1024 * 1024;
 pub struct Logs {
     pub directory: PathBuf,
     pub rotated: bool,
-    files: [Option<tokio::fs::File>; 3],
-    sizes: [usize; 3],
+    files: [Option<tokio::fs::File>; 2],
+    sizes: [usize; 2],
 }
-pub const STREAMS: [&str; 3] = ["stdout", "stderr", "terminal"];
+pub const STREAMS: [&str; 2] = ["stdout", "stderr"];
 impl Logs {
     pub async fn new(parent: &Path, id: &str) -> Result<Self, String> {
         let directory = parent.join(id);
@@ -18,8 +18,8 @@ impl Logs {
         Ok(Self {
             directory,
             rotated: false,
-            files: [None, None, None],
-            sizes: [0; 3],
+            files: [None, None],
+            sizes: [0; 2],
         })
     }
     pub async fn append(&mut self, index: usize, data: &[u8]) -> Result<(), String> {

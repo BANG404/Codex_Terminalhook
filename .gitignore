@@ -4,3 +4,5 @@
 /plugins/terminalhook/bin/
 __pycache__/
 /.codex/
+/node_modules/
+/ui/dist/

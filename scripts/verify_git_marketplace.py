@@ -211,8 +211,10 @@ def main():
             transport = next(s for s in cli("mcp", "list") if "terminalhook" in s["name"])["transport"]
             client = Client([transport["command"], *transport.get("args", [])], cwd=transport["cwd"])
             try:
-                client.run("print('READY')")
-                assert client.result()["status"] == "matched", "Installed MCP launch route failed"
+                client.send("tools/list", {}, 2)
+                tools = {tool["name"] for tool in client.receive()["result"]["tools"]}
+                assert tools == {"check_background", "submit_task", "get_task", "list_tasks",
+                                 "cancel_task", "retry_delivery", "watch_tasks"}, tools
             finally:
                 client.close()
             assert snapshot()["features"] == current["features"]
