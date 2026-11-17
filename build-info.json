@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "version": "0.5.0-alpha.68.g274b0c2eca0e",
+  "version": "0.5.0-alpha.75.gb4a4bce56b80",
   "baseVersion": "0.5.0",
   "channel": "alpha",
-  "revision": "274b0c2eca0e9b3f8ff1bb328a561959117d8b07",
-  "sequence": 68,
-  "sourceDateEpoch": 1794897890,
-  "builtAt": "2026-11-17T06:44:50+00:00",
+  "revision": "b4a4bce56b80d44ca5abc98112532275b7449fbf",
+  "sequence": 75,
+  "sourceDateEpoch": 1794909425,
+  "builtAt": "2026-11-17T09:57:05+00:00",
   "dirty": false
 }
