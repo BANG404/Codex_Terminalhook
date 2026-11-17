@@ -168,45 +168,43 @@ explicitly before deleting their state. A worker killed by the OS is not
 automatically restarted; `worker_live: false` identifies an unavailable control
 endpoint, and its last recorded execution state does not establish completion.
 
-## MCP Apps dashboard
+## MCP Apps task panel
 
-`list_tasks`, `submit_task`, and `get_task` reference the embedded
+`submit_task`, `get_task`, `cancel_task`, and `retry_delivery` reference the embedded
 `ui://terminalhook/tasks.html` resource, served as `text/html;profile=mcp-app`.
-A compatible MCP Apps host renders a dashboard for the calling chat: task
-states, delivery state, deadline, elapsed duration, exit code, and bounded live
-or saved output. The interface uses English; task names and output retain their original text.
+A compatible MCP Apps host renders a compact detail card for the task associated
+with that tool call: execution and delivery states, deadline, elapsed duration,
+exit code, working directory, and bounded live or saved output. The interface uses
+English; task names and output retain their original text. `list_tasks` remains
+available for explicit chat-wide inspection and does not open a panel.
 
-The compact Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/)
-components: status tabs and search filter the list, an icon marks delivery,
-and Details expands task identifiers and deadlines. The default desktop panel
-is about 330 pixels tall; lists and output scroll inside it. Narrow panels stack
-the list above the output. Theme changes follow the host. Controls have keyboard
-focus and accessible names. The panel starts with filters and search, with no
-title bar, language selector, refresh switch, or refresh button. Selected rows use
-a background tint without a left border. Detail reads also reconcile the list
-status, so a completed detail cannot leave its row marked running.
+The Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/) components.
+There is no task list, search, or status filter. Details expands task identifiers,
+deadlines, and delivery receipts. Output scrolls inside the compact panel on both
+desktop and narrow screens. Theme changes follow the host; controls have keyboard
+focus and accessible names.
 
-After the MCP Apps initialize handshake, the view reads one initial task list
-through host-mediated `tools/call`, unless a host callback already supplied a
-list revision. A single-task submission or detail callback can render immediately,
-but does not replace this initial snapshot: the subscription still needs its
-revision. If a single-task callback arrives during that read, the view discards
-the older response and reads again before subscribing; a newer versioned host
-snapshot is retained without another list request. Later updates are triggered
-only by `ui/notifications/tool-result` callbacks: list snapshots replace the list and
-load the selected task's details; individual task results update that task
-directly. Selecting a task also reads its details on demand. There is no timed
-polling, error retry timer, or refresh on visibility changes. The view also keeps
-one app-only `watch_tasks` subscription pending after the last list revision.
-Native filesystem callbacks for saved task state/result changes resolve it with
-a new snapshot, then the view subscribes to the next change. Unrelated chats,
-file reads, and log writes do not produce UI updates. Registration precedes the
-snapshot read to avoid losing completion between requests. This starts no model
-turn and makes no periodic list requests. A transport deadline callback silently
-renews the subscription without refreshing the view, so idle panels can still
-receive later completion events. Other errors stop the subscription without a
-timed retry; a subsequent host snapshot can reconnect it. Teardown
-cancels pending requests. Hosts must support app-only tools and pending tool calls.
+After the MCP Apps initialize handshake, the panel waits for the originating
+`ui/notifications/tool-input` or `ui/notifications/tool-result` callback to identify
+the task. It never calls `list_tasks`. When the callback lacks a task revision,
+the panel reads only that task through host-mediated `get_task`, which includes
+its display metadata and revision. A newer callback takes precedence over an
+older read response. Chat-wide snapshots and results for other tasks are ignored;
+they cannot switch or clear the current card. With no task context the panel stays
+in its waiting state instead of selecting another task from the chat.
+
+The panel then keeps one app-only `watch_tasks` request pending with `task_id` and
+`after_revision`. Native filesystem callbacks for that task's saved state/result
+changes return its full details and revision; the panel subscribes to the next
+change. The watcher registers before reading the task to avoid losing completion
+between requests. Other tasks, unrelated chats, file reads, and log writes do not
+produce panel updates. Omitting `task_id` still supports an explicit chat-wide
+subscription using a `list_tasks` revision, but the embedded panel never uses it.
+There is no timed polling, error retry timer, or refresh on visibility changes.
+A transport deadline callback silently renews the subscription without a list or
+detail read. Other errors stop it; a subsequent task callback can reconnect it.
+Teardown cancels pending requests. Hosts must support app-only tools and pending
+tool calls.
 
 The view makes no external network requests and sends no model messages. Task
 output is rendered as text. Callbacks are ignored after teardown. UI updates are

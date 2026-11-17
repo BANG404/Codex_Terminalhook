@@ -270,9 +270,10 @@ is preserved on `legacy/stop-hook`.
 
 The Linux x64 alpha test job also runs the embedded MCP Apps dashboard in
 Playwright against the real TerminalHook stdio server and a deterministic host
-fixture. It verifies the resource, task tools, English-only controls, callback
-updates without idle/visibility polling or callback feedback loops, filtering,
-compact responsive layout, host themes, escaped output, and absence of external requests or UI model messages. These checks
+fixture. It verifies the resource, task tools, single-task isolation without list
+reads, English-only controls, callback updates without idle/visibility polling or
+callback feedback loops, compact responsive layout, host themes, escaped output,
+and absence of external requests or UI model messages. These checks
 contribute to `Quality checks`; native desktop rendering remains a separate
 host integration check. Node.js 20.19+ or 22.12+ and npm are needed for source
 builds; Playwright is used only for verification. The installed MCP binary needs

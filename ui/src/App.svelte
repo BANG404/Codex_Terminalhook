@@ -1,215 +1,98 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    Terminal,
-    Search,
-    ChevronDown,
-    CircleCheck,
-    CircleAlert,
-    Clock3,
-    Folder,
-    Inbox,
-    X,
-  } from "@lucide/svelte";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Skeleton } from "$lib/components/ui/skeleton";
-  import * as Tabs from "$lib/components/ui/tabs";
+  import { Terminal, ChevronDown, Clock3, Folder } from "@lucide/svelte";
   import * as Collapsible from "$lib/components/ui/collapsible";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import { HostBridge, HostResponseTimeout } from "$lib/bridge";
-  import {
-    isActive,
-    needsAttention,
-    output,
-    type Task,
-    type TaskList,
-    type TaskUpdate,
-  } from "$lib/tasks";
+  import { output, type Task, type TaskUpdate } from "$lib/tasks";
   import { labels as t, statusLabel } from "$lib/labels";
 
-  let tasks = $state<Task[]>([]);
-  let selected = $state<string | null>(null);
-  let detail = $state<Task | null>(null);
-  let filter = $state("all");
-  let query = $state("");
+  let task = $state<Task | null>(null);
   let ready = $state(false);
-  let loaded = $state(false);
   let detailBusy = $state(false);
   let expanded = $state(false);
   let error = $state("");
-  let detailError = $state("");
   let updated = $state("");
   let now = $state(Date.now());
-  let truncated = $state(false);
   let stopped = false;
-  let revision = 0;
-  let detailRequest = 0;
+  let generation = 0;
   let taskRevision = "";
-  let watching = false;
+  let syncing = false;
   let bridge: HostBridge;
   const standalone = window.parent === window;
-  const active = $derived(tasks.filter(isActive).length);
-  const attention = $derived(tasks.filter(needsAttention).length);
-  const visible = $derived(
-    tasks.filter(
-      (task) =>
-        (filter === "all" ||
-          (filter === "active" ? isActive(task) : needsAttention(task))) &&
-        [task.task_key, task.program, task.task_id]
-          .join(" ")
-          .toLowerCase()
-          .includes(query.toLowerCase().trim()),
-    ),
-  );
-  const summary = $derived(tasks.find((task) => task.task_id === selected));
   const elapsed = $derived(
-    detail?.result?.elapsed_ms != null
-      ? `${(detail.result.elapsed_ms / 1000).toFixed(1)}s`
-      : detail?.started_at_ms
-        ? `${Math.max(0, (now - detail.started_at_ms) / 1000).toFixed(1)}s`
+    task?.result?.elapsed_ms != null
+      ? `${(task.result.elapsed_ms / 1000).toFixed(1)}s`
+      : task?.started_at_ms
+        ? `${Math.max(0, (now - task.started_at_ms) / 1000).toFixed(1)}s`
         : "—",
   );
 
-  function accept(result: TaskList) {
-    if (!Array.isArray(result.tasks)) return;
-    tasks = result.tasks;
-    taskRevision = result.revision ?? "";
-    truncated = !!result.truncated;
-    loaded = true;
-    if (!tasks.some((task) => task.task_id === selected)) {
-      ++detailRequest;
-      detailBusy = false;
-      selected = tasks[0]?.task_id ?? null;
-      detail = null;
-      detailError = "";
-      expanded = false;
-    }
-  }
-  async function loadDetail() {
-    if (!selected || !ready || stopped) return;
-    const id = selected,
-      request = ++detailRequest;
-    detailBusy = true;
-    try {
-      const result = await bridge.tool<Task>("get_task", { task_id: id });
-      if (stopped || request !== detailRequest || selected !== id) return;
-      detail = result;
-      tasks = tasks.map((task) => task.task_id === id ? { ...task, ...result } : task);
-      now = Date.now();
-      detailError = "";
-    } catch (cause) {
-      if (!stopped && request === detailRequest && selected === id)
-        detailError = String(cause);
-    } finally {
-      if (request === detailRequest) detailBusy = false;
-    }
-  }
-  async function choose(id: string) {
-    if (selected === id) return;
-    selected = id;
-    detail = null;
-    detailError = "";
-    expanded = false;
-    await loadDetail();
-  }
-  function markUpdated() {
+  function accept(update: TaskUpdate) {
+    task = {
+      ...task,
+      ...update,
+      task_id: update.task_id!,
+      status: update.status ?? task?.status ?? "submitted",
+      delivery: update.delivery ?? task?.delivery ?? "pending",
+    };
+    taskRevision = update.revision ?? "";
+    now = Date.now();
     error = "";
     updated = new Date().toLocaleTimeString("en", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
   }
   function receiveUpdate(update: TaskUpdate) {
-    if (stopped) return;
-    if (Array.isArray(update.tasks)) {
-      if (update.revision && update.revision === taskRevision) return;
-      ++revision;
+    // Bind this resource to its originating tool's task. Chat snapshots and
+    // callbacks for other tasks must never populate or switch this panel.
+    if (stopped || Array.isArray(update.tasks) || typeof update.task_id !== "string") return;
+    if (task && task.task_id !== update.task_id) return;
+    // Hosts may echo app calls; identical snapshots must not restart reads.
+    if (update.revision && update.revision === taskRevision) {
+      // A direct get callback can carry fresh output with the same saved-state
+      // revision. Merge it without starting another read or subscription.
       accept(update);
-      markUpdated();
-      void loadDetail();
-      void watchTasks();
-    } else if (
-      typeof update.task_id === "string" &&
-      typeof update.status === "string"
-    ) {
-      ++revision;
-      const existing = tasks.find((task) => task.task_id === update.task_id);
-      const task: Task = {
-        ...existing,
-        ...update,
-        task_id: update.task_id,
-        status: update.status,
-        delivery: update.delivery ?? existing?.delivery ?? "pending",
-      };
-      if (!existing && tasks.length >= 100) truncated = true;
-      tasks = existing
-        ? tasks.map((item) => (item.task_id === task.task_id ? task : item))
-        : [task, ...tasks].slice(0, 100);
-      if (!selected) selected = task.task_id;
-      if (selected === task.task_id) {
-        ++detailRequest;
-        detailBusy = false;
-        detail = { ...detail, ...task };
-        detailError = "";
-        now = Date.now();
-      }
-      loaded = true;
-      markUpdated();
+      void synchronize();
+      return;
     }
+    ++generation;
+    accept(update);
+    void synchronize();
   }
-  async function watchTasks() {
-    if (watching || !ready || stopped || !taskRevision) return;
-    watching = true;
+  async function synchronize() {
+    if (syncing || !ready || stopped || !task) return;
+    syncing = true;
     try {
-      while (!stopped && ready && taskRevision) {
-        const before = revision;
+      while (!stopped && ready && task) {
+        const before = generation;
+        const id = task.task_id;
         const after = taskRevision;
-        let update: TaskList;
+        detailBusy = !after;
+        let update: Task;
         try {
-          update = await bridge.tool<TaskList>("watch_tasks", { after_revision: after });
+          update = after
+            ? await bridge.tool<Task>("watch_tasks", { task_id: id, after_revision: after })
+            : await bridge.tool<Task>("get_task", { task_id: id });
         } catch (cause) {
-          // Renew a bounded transport subscription from its timeout callback.
-          // This does not refresh data or start a separate polling/retry timer.
-          if (!stopped && cause instanceof HostResponseTimeout) continue;
+          if (before !== generation && !stopped) continue;
+          // Renew only the bounded transport subscription, without a data read.
+          if (!stopped && after && cause instanceof HostResponseTimeout) continue;
           throw cause;
         }
         if (stopped) return;
-        if (!Array.isArray(update.tasks) || !update.revision || update.revision === after)
+        if (before !== generation) continue;
+        if (update.task_id !== id || !update.revision || (after && update.revision === after))
           throw new Error("Invalid task event response");
-        // A host callback may have already supplied a newer snapshot.
-        if (revision === before) receiveUpdate(update);
+        accept(update);
+        detailBusy = false;
       }
     } catch (cause) {
       if (!stopped) error = String(cause);
-      // Other errors stop the subscription; no timed retry or heartbeat.
     } finally {
-      watching = false;
+      detailBusy = false;
+      syncing = false;
     }
-  }
-  async function initialize() {
-    // A submit/get callback can render a task before the handshake completes,
-    // but only a list snapshot supplies the revision needed to subscribe.
-    while (!stopped && !taskRevision) {
-      // A callback can carry newer data while the initial read is in flight.
-      const initialRevision = revision;
-      try {
-        const result = await bridge.tool<TaskList>("list_tasks");
-        if (stopped) return;
-        // Preserve newer callbacks. If one only carried an individual task,
-        // read again to obtain an authoritative snapshot and watch revision.
-        if (revision !== initialRevision) continue;
-        accept(result);
-        markUpdated();
-        break;
-      } catch (cause) {
-        if (!stopped && revision === initialRevision) error = String(cause);
-        return;
-      }
-    }
-    void watchTasks();
-    await loadDetail();
   }
   onMount(() => {
     document.documentElement.classList.toggle(
@@ -233,7 +116,7 @@
         .then(() => {
           if (!stopped) {
             ready = true;
-            void initialize();
+            void synchronize();
             requestAnimationFrame(reportSize);
           }
         })
@@ -265,95 +148,21 @@
 </script>
 
 <main class="dashboard" aria-label={t.title}>
-  <div class="filterbar">
-    <Tabs.Root bind:value={filter}>
-      <Tabs.List aria-label={t.tasks}>
-        <Tabs.Trigger value="all"
-          >{t.all}<span class="tab-count">{tasks.length}</span></Tabs.Trigger
-        >
-        <Tabs.Trigger value="active"
-          >{t.active}<span class="tab-count">{active}</span></Tabs.Trigger
-        >
-        <Tabs.Trigger value="attention"
-          >{t.attention}<span
-            class:has-attention={attention > 0}
-            class="tab-count">{attention}</span
-          ></Tabs.Trigger
-        >
-      </Tabs.List>
-    </Tabs.Root>
-    <div class="search">
-      <Search class="size-3.5" /><Input
-        aria-label={t.search}
-        placeholder={t.search}
-        bind:value={query}
-        class="h-7 pl-7 pr-7 text-xs"
-      />{#if query}<Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Clear search"
-          onclick={() => (query = "")}><X class="size-3" /></Button
-        >{/if}
-    </div>
-  </div>
-  <div class="workspace">
-    <section class="task-list" aria-label={t.tasks}>
-      {#if !loaded && !standalone && !error}
-        <div class="loading" aria-label={t.loading}>
-          {#each [1, 2, 3] as n (n)}<Skeleton class="h-11 w-full" />{/each}
-        </div>
-      {:else if !visible.length}
-        <div class="empty">
-          <Inbox class="size-5" /><span
-            >{query || filter !== "all" ? t.noMatch : t.empty}</span
-          >
-        </div>
-      {:else}
-        {#each visible as task (task.task_id)}
-          <button
-            class="task-row"
-            aria-pressed={selected === task.task_id}
-            onclick={() => choose(task.task_id)}
-          >
-            <div class="task-title">
-              <span class="task-name" title={task.task_key || task.task_id}
-                >{task.task_key || task.task_id}</span
-              ><StatusBadge value={task.status} />
-            </div>
-            <div class="task-sub">
-              <span class="task-program" title={task.program}
-                >{task.program || "—"}</span
-              ><span
-                class="delivery-icon"
-                class:delivery-attention={needsAttention(task)}
-                title={`${t.delivery}: ${statusLabel(task.delivery)}`}
-                aria-label={`${t.delivery}: ${statusLabel(task.delivery)}`}
-                >{#if task.delivery === "delivered"}<CircleCheck
-                    class="size-3.5"
-                  />{:else if needsAttention(task)}<CircleAlert
-                    class="size-3.5"
-                  />{:else}<Clock3 class="size-3.5" />{/if}</span
-              >
-            </div>
-          </button>
-        {/each}
-      {/if}
-    </section>
     <section
       id="detail"
       class="detail"
       aria-label={t.details}
       aria-busy={detailBusy}
     >
-      {#if selected && summary}
+      {#if task}
         <div class="detail-heading">
-          <strong title={summary.task_key || selected}
-            >{summary.task_key || selected}</strong
-          ><StatusBadge value={detail?.delivery || summary.delivery} />
+          <strong title={task.task_key || task.task_id}
+            >{task.task_key || task.task_id}</strong
+          ><div class="task-badges"><StatusBadge value={task.status} /><span aria-label={`${t.delivery}: ${statusLabel(task.delivery)}`}><StatusBadge value={task.delivery} /></span></div>
         </div>
         <div class="detail-metrics">
           <span title={t.duration}><Clock3 class="size-3" />{elapsed}</span
-          ><span>{t.exit} <b>{detail?.result?.exit_code ?? "—"}</b></span
+          ><span>{t.exit} <b>{task?.result?.exit_code ?? "—"}</b></span
           ><Collapsible.Root bind:open={expanded}
             ><Collapsible.Trigger class="details-trigger"
               >{t.details}<ChevronDown
@@ -362,36 +171,33 @@
             ><Collapsible.Content class="metadata"
               ><dl>
                 <dt>{t.id}</dt>
-                <dd>{selected}</dd>
+                <dd>{task.task_id}</dd>
                 <dt>{t.status}</dt>
                 <dd>
-                  {statusLabel(detail?.status || summary.status)}
+                  {statusLabel(task.status)}
                 </dd>
                 <dt>{t.deadline}</dt>
                 <dd>
-                  {summary.timeout_ms
-                    ? `${summary.timeout_ms / 1000}s`
+                  {task.timeout_ms
+                    ? `${task.timeout_ms / 1000}s`
                     : t.unlimited}
                 </dd>
-                {#if detail?.receipt?.turn?.id}<dt>{t.receipt}</dt>
-                  <dd>{detail.receipt.turn.id}</dd>{/if}
+                {#if task?.receipt?.turn?.id}<dt>{t.receipt}</dt>
+                  <dd>{task.receipt.turn.id}</dd>{/if}
               </dl></Collapsible.Content
             ></Collapsible.Root
           >
         </div>
-        <div class="directory" title={summary.cwd}>
-          <Folder class="size-3" /><span>{summary.cwd || "—"}</span>
+        <div class="directory" title={task.cwd}>
+          <Folder class="size-3" /><span>{task.cwd || "—"}</span>
         </div>
-        {#if detailError}<div class="inline-error" role="alert">
-            {detailError}
-          </div>{/if}
-        {#if detail?.delivery_error || detail?.launch_error?.error || detail?.error}<div
+        {#if task?.delivery_error || task?.launch_error?.error || task?.error}<div
             class="inline-error"
             role="alert"
           >
-            {detail.delivery_error ||
-              detail.launch_error?.error ||
-              detail.error}
+            {task.delivery_error ||
+              task.launch_error?.error ||
+              task.error}
           </div>{/if}
         <div class="output-label">
           <Terminal class="size-3" />{t.output}{#if detailBusy}<span
@@ -399,13 +205,12 @@
             ></span>{/if}
         </div>
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable output needs keyboard access.) -->
-        <pre tabindex="0" role="region" aria-label={t.output}>{output(detail) ||
-            (detailBusy && !detail ? t.loading : t.nooutput)}</pre>
+        <pre tabindex="0" role="region" aria-label={t.output}>{output(task) ||
+            (detailBusy ? t.loading : t.nooutput)}</pre>
       {:else}<div class="empty">
           <Terminal class="size-5" /><span>{t.select}</span>
         </div>{/if}
     </section>
-  </div>
   <div
     class="statusbar"
     role="status"
@@ -422,8 +227,7 @@
             ? t.connecting
             : updated
               ? `${t.updated} ${updated}`
-              : t.loading}</span
+              : t.select}</span
     >
-    {#if truncated}<span class="status-extra">{t.truncated}</span>{/if}
   </div>
 </main>

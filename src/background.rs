@@ -84,8 +84,10 @@ pub struct TaskRequest {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WatchTasksRequest {
-    /// Revision from the previous list snapshot. Wait for an actual state change.
+    /// Revision from the previous task or list snapshot. Wait for an actual state change.
     pub after_revision: String,
+    /// Subscribe only to this owned task; omit for an explicit chat-wide subscription.
+    pub task_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -245,6 +247,10 @@ pub async fn submit(
             state["worker_pid"] = json!(pid);
             state["status"] = json!("submitted");
             state["state_dir"] = json!(path);
+            state["task_key"] = json!(job.request.task_key);
+            state["program"] = json!(job.request.program);
+            state["cwd"] = json!(job.request.cwd);
+            state["timeout_ms"] = json!(job.request.timeout_ms);
             Ok(state)
         }
         Err(error) => {
@@ -295,15 +301,21 @@ pub fn spawn_worker(path: &Path) -> Result<u32, String> {
 }
 
 pub async fn get(id: &str, thread_id: &str) -> Result<Value, String> {
-    let (path, _) = owned_job(id, thread_id)?;
+    let (path, job) = owned_job(id, thread_id)?;
     let mut state = read_json(&path.join("state.json"))?;
     state["state_dir"] = json!(path);
+    state["task_key"] = json!(job.request.task_key);
+    state["program"] = json!(job.request.program);
+    state["cwd"] = json!(job.request.cwd);
+    state["timeout_ms"] = json!(job.request.timeout_ms);
     if path.join("launch-error.json").exists() {
         state["launch_error"] = read_json(&path.join("launch-error.json"))?;
     }
     if path.join("result.json").exists() {
         state["result"] = read_json(&path.join("result.json"))?;
     }
+    // Revisions track saved state/results, not transient liveness or log reads.
+    set_revision(&mut state);
     if matches!(state["status"].as_str(), Some("running" | "queued")) {
         state["worker_live"] = json!(control(&path, "ping").await.is_ok());
         let mut tails = json!({});
@@ -366,11 +378,15 @@ pub async fn list(thread_id: &str) -> Result<Value, String> {
     let total = tasks.len();
     tasks.truncate(100);
     let mut snapshot = json!({"tasks":tasks,"total":total,"truncated":total>100});
+    set_revision(&mut snapshot);
+    Ok(snapshot)
+}
+
+fn set_revision(snapshot: &mut Value) {
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     snapshot.to_string().hash(&mut hash);
     snapshot["revision"] = json!(format!("{:016x}", hash.finish()));
-    Ok(snapshot)
 }
 
 pub async fn watch_tasks(
@@ -385,10 +401,15 @@ pub async fn watch_tasks(
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit())
     {
-        return Err("after_revision must come from a task list snapshot".into());
+        return Err("after_revision must come from a task or list snapshot".into());
     }
-    let root = bridge::task_root()?;
-    private_dir(&root)?;
+    let root = if let Some(id) = &request.task_id {
+        owned_job(id, thread_id)?.0
+    } else {
+        let root = bridge::task_root()?;
+        private_dir(&root)?;
+        root
+    };
     let (sender, mut events) = tokio::sync::mpsc::channel(1);
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
         // Coalesce native filesystem callbacks. Reads/access and log writes do
@@ -412,7 +433,11 @@ pub async fn watch_tasks(
         .map_err(err)?;
     // Register before reading, so completion during subscription cannot be lost.
     loop {
-        let snapshot = list(thread_id).await?;
+        let snapshot = if let Some(id) = &request.task_id {
+            get(id, thread_id).await?
+        } else {
+            list(thread_id).await?
+        };
         if snapshot["revision"] != request.after_revision {
             return Ok(snapshot);
         }

@@ -166,6 +166,45 @@ class BackgroundTests(unittest.TestCase):
             directory.rmdir()
         self.assertEqual(self.call("list_tasks")["tasks"], [])
 
+    def test_single_task_subscription_isolates_same_chat_tasks_and_returns_details(self):
+        release = self.root / "release-current"
+        job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('current finished')")
+        snapshot = self.await_state(job, lambda s: s["status"] == "running")
+        self.assertEqual(snapshot["task_key"], "task-0")
+        self.assertEqual(snapshot["cwd"], str(self.root))
+        watcher = Client()
+        try:
+            watcher.send("tools/call", {"name": "watch_tasks", "arguments": {
+                "task_id": job["task_id"], "after_revision": snapshot["revision"]},
+                "_meta": {"threadId": OWNER}}, 20)
+            other = self.submit("print('unrelated finished')")
+            self.await_state(other, lambda s: s["delivery"] == "delivered")
+            with self.assertRaises(queue.Empty):
+                watcher.receive(.3)
+            # A state change before the next watch registers must also be seen.
+            release.touch()
+            snapshot = watcher.result(12)
+            for ident in range(21, 31):
+                self.assertEqual(snapshot["task_id"], job["task_id"])
+                self.assertNotIn("tasks", snapshot)
+                if snapshot["status"] == "completed" and snapshot["delivery"] == "delivered":
+                    self.assertIn("current finished", snapshot["result"]["output_tail"]["stdout"])
+                    break
+                watcher.send("tools/call", {"name": "watch_tasks", "arguments": {
+                    "task_id": job["task_id"], "after_revision": snapshot["revision"]},
+                    "_meta": {"threadId": OWNER}}, ident)
+                snapshot = watcher.result(12)
+            else:
+                self.fail("single-task subscription did not settle")
+            denied = self.call("watch_tasks", {"task_id": job["task_id"],
+                "after_revision": snapshot["revision"]}, owner=OTHER)
+            self.assertIn("different chat", denied["message"])
+            invalid = self.call("watch_tasks", {"task_id": "../task", "after_revision": snapshot["revision"]})
+            self.assertIn("invalid task_id", invalid["message"])
+        finally:
+            release.touch()
+            watcher.close()
+
     def test_successful_proxy_continuously_drains_large_stderr(self):
         code = "import sys,runpy; sys.stderr.buffer.write(b'x'*200000); sys.stderr.flush(); runpy.run_path(sys.argv[1],run_name='__main__')"
         with patch.dict(os.environ, {"TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, "-u", "-c", code, str(ROOT / "tests/fake_codex_proxy.py")])}):
