@@ -187,8 +187,13 @@ a background tint without a left border. Detail reads also reconcile the list
 status, so a completed detail cannot leave its row marked running.
 
 After the MCP Apps initialize handshake, the view reads one initial task list
-through host-mediated `tools/call`. Later updates are triggered only by
-`ui/notifications/tool-result` callbacks: list snapshots replace the list and
+through host-mediated `tools/call`, unless a host callback already supplied a
+list revision. A single-task submission or detail callback can render immediately,
+but does not replace this initial snapshot: the subscription still needs its
+revision. If a single-task callback arrives during that read, the view discards
+the older response and reads again before subscribing; a newer versioned host
+snapshot is retained without another list request. Later updates are triggered
+only by `ui/notifications/tool-result` callbacks: list snapshots replace the list and
 load the selected task's details; individual task results update that task
 directly. Selecting a task also reads its details on demand. There is no timed
 polling, error retry timer, or refresh on visibility changes. The view also keeps

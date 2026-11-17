@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { verifyStartup } from "./verify_ui_startup.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { chromium } = await import(
@@ -142,7 +143,7 @@ try {
   await page.setContent(
     '<style>body{margin:0;background:#eef0f4;padding:18px}iframe{width:100%;height:800px;border:0;border-radius:14px}</style><iframe title="TerminalHook task dashboard"></iframe>',
   );
-  await page.evaluate(() => {
+  await page.evaluate((submitted) => {
     window.hostCalls = [];
     window.toolCalls = [];
     window.sizes = [];
@@ -158,13 +159,19 @@ try {
       }
       if (message.id == null) return;
       let result;
-      if (message.method === "ui/initialize")
+      if (message.method === "ui/initialize") {
+        // Opening submit_task's resource delivers the single-task result before
+        // initialization finishes. It is not a list snapshot or watch cursor.
+        frame.contentWindow.postMessage(
+          { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: { structuredContent: submitted } },
+          "*",
+        );
         result = {
           protocolVersion: "2026-01-26",
           hostCapabilities: {},
           hostContext: { theme: "light" },
         };
-      else if (message.method === "tools/call") {
+      } else if (message.method === "tools/call") {
         const { name, arguments: args } = message.params;
         window.toolCalls.push(name);
         if (name === "watch_tasks" && window.fixture) return;
@@ -193,7 +200,7 @@ try {
           "*",
         );
     });
-  });
+  }, submitted);
   await page.locator("iframe").evaluate((frame, html) => {
     // Exercise the real deadline callback without waiting ten minutes. The
     // callback is invoked explicitly only after the first completion below.
@@ -456,10 +463,13 @@ try {
     [...new Set(await page.evaluate(() => window.toolCalls))].sort(),
     ["get_task", "list_tasks", "watch_tasks"],
   );
+  await verifyStartup(browser, html);
   const evidence = {
     passed: true,
     actual_mcp_resource: true,
     actual_task_tools: true,
+    submit_result_before_initialize: true,
+    startup_callback_orderings: true,
     english_only: true,
     no_header_or_refresh_controls: true,
     no_idle_or_visibility_polling: true,
