@@ -2,6 +2,19 @@
 import type { TaskUpdate } from "./tasks";
 
 export class HostResponseTimeout extends Error {}
+export class TaskChatMismatch extends Error {}
+
+function toolError(result: ToolResult): Error {
+  const text = result.content?.find((part) => part.type === "text")?.text;
+  let detail = result.structuredContent as { code?: string; message?: string } | undefined;
+  if (!detail && text) {
+    try { detail = JSON.parse(text); } catch { /* Older hosts may return plain text. */ }
+  }
+  const message = detail?.message ?? text ?? "Tool failed";
+  return detail?.code === "task_chat_mismatch" || message === "task belongs to a different chat"
+    ? new TaskChatMismatch(message)
+    : new Error(message);
+}
 
 interface ToolResult {
   isError?: boolean;
@@ -10,7 +23,7 @@ interface ToolResult {
 }
 function data<T>(result: ToolResult): T {
   const text = result.content?.find((part) => part.type === "text")?.text;
-  if (result.isError) throw new Error(text || "Tool failed");
+  if (result.isError) throw toolError(result);
   return (result.structuredContent ?? (text ? JSON.parse(text) : {})) as T;
 }
 export class HostBridge {
@@ -28,7 +41,7 @@ export class HostBridge {
   constructor(
     private onTasks: (tasks: TaskUpdate) => void,
     private onStop: () => void,
-    private onError: (message: string) => void,
+    private onError: (error: Error) => void,
   ) {
     window.addEventListener("message", this.receive);
   }
@@ -96,7 +109,7 @@ export class HostBridge {
       try {
         this.onTasks(data<TaskUpdate>(message.params));
       } catch (error) {
-        this.onError(String(error));
+        this.onError(error instanceof Error ? error : new Error(String(error)));
       }
     } else if (message.method === "ping")
       this.post({ id: message.id, result: {} });

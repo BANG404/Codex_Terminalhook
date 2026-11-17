@@ -224,6 +224,14 @@ pre {
   margin-top: 5px;
   height: 120px;
 }
+.original-chat {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.original-chat p {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+}
 .empty {
   min-height: 150px;
   height: 100%;

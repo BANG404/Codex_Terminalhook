@@ -184,11 +184,13 @@ fn task_path(id: &str) -> Result<PathBuf, String> {
     }
     Ok(bridge::task_root()?.join(id))
 }
+pub const TASK_CHAT_MISMATCH: &str = "task belongs to a different chat";
+
 fn owned_job(id: &str, thread_id: &str) -> Result<(PathBuf, Job), String> {
     let path = task_path(id)?;
     let job: Job = serde_json::from_value(read_json(&path.join("request.json"))?).map_err(err)?;
     if job.thread_id != thread_id {
-        return Err("task belongs to a different chat".into());
+        return Err(TASK_CHAT_MISMATCH.into());
     }
     Ok((path, job))
 }

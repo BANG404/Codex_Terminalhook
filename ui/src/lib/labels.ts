@@ -13,6 +13,8 @@ export const labels = {
   output: "Output",
   nooutput: "Waiting for output…",
   failed: "Update failed",
+  originalChat: "Task belongs to the original chat",
+  originalChatHelp: "Forking a chat does not transfer its background tasks. Open the original chat to view this task’s current state. Results are still delivered there. Do not resubmit the command to recover its status.",
   status: "Status",
   id: "Task ID",
   cwd: "Directory",

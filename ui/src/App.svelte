@@ -3,7 +3,7 @@
   import { Terminal, ChevronDown, Clock3, Folder } from "@lucide/svelte";
   import * as Collapsible from "$lib/components/ui/collapsible";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
-  import { HostBridge, HostResponseTimeout } from "$lib/bridge";
+  import { HostBridge, HostResponseTimeout, TaskChatMismatch } from "$lib/bridge";
   import { output, type Task, type TaskUpdate } from "$lib/tasks";
   import { labels as t, statusLabel } from "$lib/labels";
 
@@ -12,6 +12,7 @@
   let detailBusy = $state(false);
   let expanded = $state(false);
   let error = $state("");
+  let foreignTask = $state(false);
   let updated = $state("");
   let now = $state(Date.now());
   let stopped = false;
@@ -28,6 +29,19 @@
         : "—",
   );
 
+  function handleError(cause: unknown) {
+    if (stopped) return;
+    if (cause instanceof TaskChatMismatch) {
+      foreignTask = true;
+      error = "";
+      // A fork can replay the original tool callbacks. Permanently stop this
+      // panel, including pending calls, without changing the original job.
+      ++generation;
+      bridge.dispose();
+    } else {
+      error = String(cause);
+    }
+  }
   function accept(update: TaskUpdate) {
     task = {
       ...task,
@@ -75,6 +89,7 @@
             ? await bridge.tool<Task>("watch_tasks", { task_id: id, after_revision: after })
             : await bridge.tool<Task>("get_task", { task_id: id });
         } catch (cause) {
+          if (cause instanceof TaskChatMismatch) throw cause;
           if (before !== generation && !stopped) continue;
           // Renew only the bounded transport subscription, without a data read.
           if (!stopped && after && cause instanceof HostResponseTimeout) continue;
@@ -88,7 +103,7 @@
         detailBusy = false;
       }
     } catch (cause) {
-      if (!stopped) error = String(cause);
+      handleError(cause);
     } finally {
       detailBusy = false;
       syncing = false;
@@ -106,9 +121,7 @@
         stopped = true;
         ready = false;
       },
-      (message) => {
-        error = message;
-      },
+      handleError,
     );
     if (!standalone)
       bridge
@@ -121,7 +134,7 @@
           }
         })
         .catch((cause) => {
-          if (!stopped) error = String(cause);
+          handleError(cause);
         });
     const dispose = () => bridge.dispose();
     window.addEventListener("pagehide", dispose);
@@ -154,7 +167,12 @@
       aria-label={t.details}
       aria-busy={detailBusy}
     >
-      {#if task}
+      {#if foreignTask}
+        <div class="original-chat" role="status">
+          <strong>{t.originalChat}</strong>
+          <p>{t.originalChatHelp}</p>
+        </div>
+      {:else if task}
         <div class="detail-heading">
           <strong title={task.task_key || task.task_id}
             >{task.task_key || task.task_id}</strong
@@ -217,9 +235,11 @@
     aria-live="polite"
     class:is-error={!!error}
   >
-    <span class="connection-dot" class:connected={ready && !error}></span>
+    <span class="connection-dot" class:connected={ready && !error && !foreignTask}></span>
     <span class="notice" title={error}
-      >{error
+      >{foreignTask
+        ? t.originalChat
+        : error
         ? `${t.failed}: ${error}`
         : standalone
           ? t.standalone

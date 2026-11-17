@@ -206,6 +206,14 @@ detail read. Other errors stop it; a subsequent task callback can reconnect it.
 Teardown cancels pending requests. Hosts must support app-only tools and pending
 tool calls.
 
+Forking a chat copies its tool history, but background tasks remain owned by the
+originating chat. If an inherited card receives `task_chat_mismatch` (or the older
+`task belongs to a different chat` error), it shows an informational notice and
+stops all reads and subscriptions, including echoed callbacks. It does not show
+inherited snapshots as current state. Open the original chat to inspect, cancel,
+or recover that task; results still go there. Never resubmit the command just to
+recover its status. Other tool failures remain visible as errors.
+
 The view makes no external network requests and sends no model messages. Task
 output is rendered as text. Callbacks are ignored after teardown. UI updates are
 independent of completion delivery, so closing the panel does not stop tasks or

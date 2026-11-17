@@ -117,6 +117,21 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(retry["delivery"], "delivered")
         self.assertEqual(len(self.deliveries()), 1)
 
+    def test_fork_cannot_read_watch_cancel_or_redeliver_original_task(self):
+        job = self.submit("import time; time.sleep(.7); print('original chat result')")
+        for name in ("get_task", "watch_tasks", "cancel_task", "retry_delivery"):
+            args = {"task_id": job["task_id"]}
+            if name == "watch_tasks":
+                args["after_revision"] = self.state(job)["revision"]
+            denied = self.call(name, args, owner=OTHER)
+            self.assertEqual(denied, {"status": "error", "code": "task_chat_mismatch",
+                                     "message": "task belongs to a different chat"})
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual(state["thread_id"], OWNER)
+        self.assertEqual(len(self.deliveries()), 1)
+        self.assertEqual(self.call("list_tasks", owner=OTHER)["tasks"], [])
+
     def test_delivery_retains_proxy_diagnostics_in_saved_state(self):
         job = self.submit("import time; time.sleep(.7); print('saved before delivery')")
         (self.root / "proxy-error").write_text("original host connection refused 中文", encoding="utf-8")
