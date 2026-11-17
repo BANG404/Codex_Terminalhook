@@ -42,6 +42,12 @@ printed `scripts/deliver.py follow <number> --head <sha> --merge` command; do no
 blindly replay commits, pushes, PR creation, or merge writes. A changed source
 requires new checks. Preserve failed PRs and their source for repair.
 
+Alpha advancement alone does not invalidate successful checks for the original
+PR HEAD. Verify the CI package report's tested merge parents and tree, and require
+the tested base to remain in current alpha history. Actual conflicts or source
+changes require repair and fresh checks. A non-strict required-status-check policy
+supports this model; never change protections automatically to make a PR merge.
+
 Automatic task delivery only merges into alpha. Promoting later stages and
 publishing a release remain separate actions requiring their own authorization.
 For implementation details and the stage policy, read

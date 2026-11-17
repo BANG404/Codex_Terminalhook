@@ -96,12 +96,28 @@ rechecks PR identity and gates before a SHA-bound `merge_method=merge` request,
 then proves the resulting commit has two parents with that source as its second.
 Native GitHub Auto-merge is not used and must not already be active on that PR.
 
-Required reviews and branch protections still apply. Missing or pending checks
-wait; failed/cancelled checks, conflicts, changed source, wrong repositories,
-and closed unmerged PRs stop delivery. Strict protection may require updating a
-branch after alpha advances; resolve that in the task and verify the new source.
-No protection is weakened, no source branch is automatically rewritten, and no
-beta/rc/main promotion or release is triggered by task delivery.
+Alpha advancement alone does not change the verified PR HEAD or require another
+source commit. Following sandboxpi's [source-gate policy](https://github.com/BANG404/sandboxpi/blob/alpha/.agents/skills/git-delivery/references/alpha-pr.md),
+the helper downloads the existing `package-verification` report from the verified
+CI run. Its recorded merge candidate must have the PR HEAD as its second parent
+and the reported source tree. Its first parent is the tested base: that base may
+be older than current alpha, but must remain its ancestor. Missing package proof,
+a mismatched candidate, or an alpha history rewrite blocks merge. This verifies
+the saved candidate; it does not claim the latest combined alpha tree was tested.
+
+Required reviews and branch protections still apply. Source-based alpha delivery
+uses non-strict required status checks (`strict: false`), retaining both required
+checks without an App binding in branch protection. The delivery client still
+verifies the actual GitHub Actions run and jobs described above. This removes the requirement
+that every PR include the latest alpha commit; it does not remove CI or conflict
+checks. Configuration is an explicit repository policy change, not a merge bypass.
+If strict protection is still enabled, a `behind` PR stops with a policy diagnostic
+rather than being described as conflicted. The helper never changes protection
+settings, updates the branch, or reruns CI merely because alpha advances.
+Missing/pending checks wait; failed/cancelled checks, real conflicts, changed
+source, wrong repositories, and closed unmerged PRs stop delivery. Repairing
+conflicts or changing the source requires fresh HEAD checks. No beta/rc/main
+promotion or release is triggered by task delivery.
 
 One lock in the common Git directory prevents multiple waiters across worktrees.
 An interrupted operation retains its local commit, remote branch, and PR. Resume
