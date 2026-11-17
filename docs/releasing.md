@@ -155,6 +155,7 @@ rustup component add llvm-tools-preview
 mkdir -p artifacts/coverage
 cargo llvm-cov --locked --json --summary-only --output-path artifacts/coverage/llvm.json
 python3 scripts/check_coverage.py artifacts/coverage/llvm.json
+mkdir -p artifacts
 cargo mutants --in-place --file src/spec.rs --re 'validate_(run|deadline)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
 cargo build --locked
 python3 scripts/verify_performance.py
