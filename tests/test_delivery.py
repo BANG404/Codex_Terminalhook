@@ -15,6 +15,7 @@ spec = importlib.util.spec_from_file_location("deliver", ROOT / "scripts/deliver
 delivery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(delivery)
 HEAD, BASE, MERGE = "a" * 40, "b" * 40, "c" * 40
+TESTED, TREE, ADVANCED = "d" * 40, "e" * 40, "f" * 40
 REPO = delivery.REPOSITORY
 
 
@@ -40,6 +41,10 @@ class FakeGitHub:
         self.decision = ""
         self.writes = []
         self.lose_merge_response = False
+        self.report = {"passed": True, "source_revision": TESTED, "source_tree": TREE}
+        self.tested_commit = {"parents": [{"sha": BASE}, {"sha": head}], "tree": {"sha": TREE}}
+        self.ancestor = BASE
+        self.comparisons = []
 
     def api(self, path, body=None, method="GET"):
         if path == "":
@@ -56,6 +61,11 @@ class FakeGitHub:
             return deepcopy(self.run)
         if path == "git/commits/" + MERGE:
             return {"parents": deepcopy(self.parents)}
+        if path == "git/commits/" + TESTED:
+            return deepcopy(self.tested_commit)
+        if path == f"compare/{BASE}...{ADVANCED}":
+            self.comparisons.append(path)
+            return {"merge_base_commit": {"sha": self.ancestor}}
         raise AssertionError("Unexpected GitHub read " + path)
 
     def pages(self, path, _key):
@@ -69,6 +79,11 @@ class FakeGitHub:
 
     def reviews(self, _number):
         return self.decision
+
+    def package_report(self, run_id):
+        if run_id != 50:
+            raise AssertionError("Unexpected CI proof run")
+        return deepcopy(self.report)
 
 
 class DeliveryGateTests(unittest.TestCase):
@@ -182,6 +197,50 @@ class DeliveryGateTests(unittest.TestCase):
         hub.parents = [{"sha": BASE}]
         with self.assertRaisesRegex(ValueError, "second parent"):
             self.follow(hub, merge=True)
+
+    def test_alpha_advancement_keeps_original_head_and_green_ci(self):
+        hub = FakeGitHub()
+        hub.pr["base"]["sha"] = ADVANCED
+        hub.parents[0]["sha"] = ADVANCED
+        result = self.follow(hub, merge=True)
+        self.assertTrue(result["merged"])
+        self.assertEqual(hub.comparisons, [f"compare/{BASE}...{ADVANCED}"])
+        self.assertEqual(hub.writes[0][0]["sha"], HEAD)
+        self.assertEqual(hub.report["source_revision"], TESTED)
+
+    def test_alpha_history_rewrite_retains_source_without_merge(self):
+        hub = FakeGitHub()
+        hub.pr["base"]["sha"] = ADVANCED
+        hub.ancestor = HEAD
+        with self.assertRaisesRegex(ValueError, "history no longer contains"):
+            self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
+
+    def test_invalid_tested_candidate_never_authorizes_merge(self):
+        for change in ("failed", "missing_revision", "invalid_tree", "wrong_head", "wrong_tree", "wrong_parents"):
+            hub = FakeGitHub()
+            if change == "failed":
+                hub.report["passed"] = False
+            elif change == "missing_revision":
+                del hub.report["source_revision"]
+            elif change == "invalid_tree":
+                hub.report["source_tree"] = "invalid"
+            elif change == "wrong_head":
+                hub.tested_commit["parents"][1]["sha"] = BASE
+            elif change == "wrong_tree":
+                hub.tested_commit["tree"]["sha"] = HEAD
+            else:
+                hub.tested_commit["parents"] = [{"sha": HEAD}]
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "CI package report"):
+                self.follow(hub, merge=True)
+            self.assertEqual(hub.writes, [])
+
+    def test_missing_package_artifact_never_authorizes_merge(self):
+        hub = FakeGitHub()
+        with patch.object(hub, "package_report", side_effect=RuntimeError("artifact missing")):
+            with self.assertRaisesRegex(RuntimeError, "artifact missing"):
+                self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
 
 
 class DeliverySubmissionTests(unittest.TestCase):

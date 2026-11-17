@@ -59,6 +59,12 @@ class GitHub:
         return self.read_json("pr", "view", str(number), "--repo", REPOSITORY,
                               "--json", "reviewDecision")["reviewDecision"]
 
+    def package_report(self, run_id):
+        with tempfile.TemporaryDirectory(prefix="terminalhook-delivery-proof-") as directory:
+            self.gh("run", "download", str(run_id), "--repo", REPOSITORY,
+                    "--name", "package-verification", "--dir", directory)
+            return json.loads((Path(directory) / "package-validation.json").read_text(encoding="utf-8"))
+
 
 def validate_pr(pr, head, branch=None):
     if (not SHA.fullmatch(head) or pr["head"]["sha"] != head
@@ -147,6 +153,30 @@ def verify_merge(hub, pr, head, branch):
     return {"pr": pr["html_url"], "head": head, "merge_commit": pr["merge_commit_sha"], "merged": True}
 
 
+def tested_base(hub, run_id, head):
+    # The aggregate records the actual tested merge candidate, even when the
+    # Actions run's pull_requests list is empty or alpha has since advanced.
+    report = hub.package_report(run_id)
+    revision, tree = report.get("source_revision", ""), report.get("source_tree", "")
+    if report.get("passed") is not True or not SHA.fullmatch(revision) or not SHA.fullmatch(tree):
+        raise ValueError("CI package report lacks a successful tested source identity")
+    commit = hub.api("git/commits/" + revision)
+    parents = commit.get("parents", [])
+    if (len(parents) != 2 or parents[1].get("sha") != head
+            or not SHA.fullmatch(parents[0].get("sha", "")) or commit.get("tree", {}).get("sha") != tree):
+        raise ValueError("CI package report does not prove this PR HEAD and tested merge tree")
+    return parents[0]["sha"]
+
+
+def verify_base_history(hub, tested, current):
+    if not SHA.fullmatch(current or ""):
+        raise ValueError("PR has no valid current alpha base")
+    if tested != current:
+        comparison = hub.api(f"compare/{tested}...{current}")
+        if comparison.get("merge_base_commit", {}).get("sha") != tested:
+            raise ValueError("Alpha history no longer contains the tested base; inspect the history rewrite")
+
+
 def follow(hub, number, head, timeout=3600, merge=False, pause=time.sleep, now=time.monotonic):
     deadline = now() + timeout
     branch = validate_pr(hub.api(f"pulls/{number}"), head)
@@ -173,10 +203,13 @@ def follow(hub, number, head, timeout=3600, merge=False, pause=time.sleep, now=t
                 if fresh.get("merged"):
                     return verify_merge(hub, fresh, head, branch)
                 if fresh.get("mergeable_state") == "behind":
-                    raise ValueError("Alpha advanced and branch protection requires an update; retain the PR and reverify")
+                    raise ValueError("PR is behind alpha, not necessarily conflicted. Strict branch protection requires an update; "
+                                     "retain this HEAD and CI. Source-based alpha delivery requires an explicitly approved "
+                                     "non-strict status-check policy; this helper never changes protections or rewrites the source")
                 eligible = fresh.get("mergeable") is True and fresh.get("mergeable_state") in {"clean", "unstable", "has_hooks"}
                 _, fresh_run = ci_progress(hub, number, head, branch)
                 if eligible and fresh_run == run_id and hub.reviews(number) not in {"REVIEW_REQUIRED", "CHANGES_REQUESTED"}:
+                    verify_base_history(hub, tested_base(hub, run_id, head), fresh["base"].get("sha"))
                     try:
                         result = hub.api(f"pulls/{number}/merge", {
                             "sha": head, "merge_method": "merge",

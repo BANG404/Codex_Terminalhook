@@ -1,10 +1,13 @@
 mod backend;
+mod background;
+mod bridge;
 mod logs;
 mod matcher;
 mod process;
 mod server;
 mod spec;
 mod tree;
+mod ui;
 
 use rmcp::ServiceExt;
 
@@ -21,6 +24,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("terminalhook {}", env!("TERMINALHOOK_VERSION"));
         return Ok(());
     }
+    let mut args = std::env::args().skip(1);
+    let action = args.next();
+    if action.as_deref() == Some("--launch-background-worker") {
+        let path = args.next().ok_or("missing task directory")?;
+        let pid = background::spawn_worker(std::path::Path::new(&path))?;
+        println!("{}", serde_json::json!({"worker_pid":pid}));
+        return Ok(());
+    }
+    if let Some(action @ ("--background-worker" | "--probe-host")) = action.as_deref() {
+        let argument = args.next().ok_or("missing command argument")?;
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(async {
+                let result = if action == "--probe-host" {
+                    bridge::probe(&argument).await
+                } else {
+                    background::worker(std::path::Path::new(&argument))
+                        .await
+                        .map(|_| serde_json::Value::Null)
+                };
+                match result {
+                    Ok(value) => {
+                        if !value.is_null() {
+                            println!("{value}");
+                        }
+                        Ok(())
+                    }
+                    Err(error) => Err(error.into()),
+                }
+            });
+    }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
@@ -28,15 +63,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn serve() -> Result<(), Box<dyn std::error::Error>> {
-    let manager = process::Manager::new()?;
-    let service = server::TerminalHook::new(manager.clone())
-        .serve(rmcp::transport::stdio())
-        .await?;
+    let service = server::TerminalHook.serve(rmcp::transport::stdio()).await?;
     let result = tokio::select! {
         result = service.waiting() => result.map(|_| ()),
         _ = tokio::signal::ctrl_c() => Ok(()),
     };
-    manager.shutdown().await;
     result?;
     Ok(())
 }

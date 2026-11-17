@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import zipfile
 
-from distribution import archive_name, binary_name, executable_path, host_platform, mcp_config
+from distribution import archive_name, binary_name, desktop_host_binary_name, executable_path, host_platform, mcp_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +27,9 @@ def main():
     shutil.copytree(ROOT / "plugins/terminalhook", plugin, ignore=shutil.ignore_patterns("bin", "__pycache__"))
     (plugin / "bin").mkdir()
     shutil.copyfile(binary, plugin / "bin" / binary_name(target))
+    desktop_host = ROOT / "target/release" / desktop_host_binary_name(target)
+    assert subprocess.check_output([str(desktop_host), "--host-version"], text=True).strip() == "terminalhook-desktop-host " + info["version"]
+    shutil.copyfile(desktop_host, plugin / "bin" / desktop_host_binary_name(target))
     manifest_path = plugin / ".codex-plugin/plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["version"] = info["version"]
@@ -37,6 +40,7 @@ def main():
                            ("scripts/install.ps1", "install.ps1"), ("scripts/Enable-DirectTools.ps1", "Enable-DirectTools.ps1"),
                            ("scripts/install.py", "install.py"), ("scripts/install.sh", "install.sh"),
                            ("scripts/distribution.py", "distribution.py"),
+                           ("scripts/Start-DesktopSharedHost.ps1", "Start-DesktopSharedHost.ps1"),
                            ("examples/package/README.md", "README.md"), ("examples/package/README.zh-CN.md", "README.zh-CN.md"),
                            ("LICENSE", "LICENSE"), ("dist/build-info.json", "build-info.json")):
         shutil.copyfile(ROOT / source, destination / name)
