@@ -81,9 +81,68 @@ macOS 二进制未签名，也未公证。
 `release-distributions` 及汇总 `package-verification` 报告。变更使用 PR，push 不重复验证，
 PR 更新后取消过时运行。Actions 固定到提交 SHA。
 
+### 测试分层与门禁
+
+测试类型存在重叠：协议套件同时提供黑盒、边界、集成及权限/隔离检查，
+不会将同一套件复制为多个测试任务。可复用的 `assurance.yml` 工作流计入
+**Quality checks**；失败或取消将阻止打包与交付。阶段提升 PR 重新执行安全扫描，
+原生测试则复用与当前源码树完全一致的 alpha 证据。
+
+| 层次 | 执行时机 | 门禁 |
+| --- | --- | --- |
+| 边界与白盒 | 每次 alpha PR：Rust 单元测试，覆盖输入上下界及不同进程模式的输出流 | 全部测试通过；`spec.rs`、`matcher.rs` 各自 LLVM 行覆盖率至少 90% |
+| 黑盒与集成 | 每次 alpha PR：五平台 stdio MCP、子进程清理、后台桥接、打包/安装/升级测试 | 核心协议及安装场景全部通过 |
+| 浏览器 E2E | 每次 alpha PR 的 Linux x64；Release 发布前再次测试最终包内程序 | 真实 MCP 仪表盘场景通过 |
+| 静态分析与依赖安全 | 每次 PR、Release 验证及每日定时扫描 | Clippy 零警告；Bandit 的 B602/B604/B605/B609 Shell 注入规则通过；Cargo audit 无已知漏洞；npm audit 无高危/严重问题，包含开发依赖 |
+| 变异测试 | 每周、手动 Assurance 开启 `deep`、Release 验证 | `validate_run` / `validate_wait` 的所有可编译变异均被测试捕获；存活变异、超时、基线失败均阻止通过 |
+| 性能 | 与变异验证一起在 Linux x64 执行 | 20 次真实 stdio 子进程启动，各输出 64 KiB、匹配窗口 4 KiB；最近秩法 p95 不超过 3 秒 |
+
+覆盖率门禁逐文件检查原始计数；缺失、重复、无效或未达标证据均失败。
+这里测量的是**行覆盖率**，不代表分支覆盖率或整个应用的覆盖率；测试代码单独存放在
+覆盖工具排除的 `*_tests.rs` 文件中。当前稳定 Rust
+未启用 LLVM 实验性分支插桩。变异范围为进程请求及超时校验器；后续新增关键模块时，
+应配套测试再扩大范围。性能预算用于发现 Linux CI runner 上的明显回退，不是用户延迟 SLA。
+本项目没有可供 DAST 扫描的已部署 HTTP 服务，改以本地浏览器隔离及协议拒绝场景验证，
+不扫描无关网络服务。
+
+Assurance 每日 UTC 02:17（北京时间 10:17）运行安全扫描，每周一 UTC 02:47
+（北京时间 10:47）运行安全、覆盖率、变异和性能检查。GitHub 定时任务仅从仓库默认分支执行，
+需先通过正常阶段流程将该工作流提升到默认分支。在此之前，可选择 `alpha` 分支手动运行
+**Assurance** 或执行本地命令；alpha PR 和 Release 门禁已直接调用可复用工作流。
+定时运行不会发布或提升源码。
+
+原生任务固定 Node 24，并缓存 npm 下载及 Rust 依赖/编译结果。
+Rust 缓存键区分操作系统、架构、任务、工具链、锁文件及源码提交；恢复前缀复用旧依赖，
+修改后的源码由 Cargo 重新构建。覆盖率与变异缓存独立。归档、身份元数据和验证报告均重新生成，
+缓存不能代替任务成功。安全报告、核心覆盖率及深度检查证据保留 14 天，失败时同样保留诊断。
+未配置漏洞豁免；扫描本身报错也会阻止验证通过。
+
+本地运行附加检查，工具版本与工作流一致：
+
+```sh
+cargo install cargo-audit --version 0.23.0 --locked
+cargo install cargo-llvm-cov --version 0.9.1 --locked
+cargo install cargo-mutants --version 27.1.0 --locked
+python3 -m pip install bandit==1.9.4
+cargo audit
+npm audit --audit-level=high
+bandit -r scripts -t B602,B604,B605,B609
+npm ci && npm run build:ui
+rustup component add llvm-tools-preview
+mkdir -p artifacts/coverage
+cargo llvm-cov --locked --json --summary-only --output-path artifacts/coverage/llvm.json
+python3 scripts/check_coverage.py artifacts/coverage/llvm.json
+cargo mutants --in-place --file src/spec.rs --re 'validate_(run|wait)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
+cargo build --locked
+python3 scripts/verify_performance.py
+```
+
+请使用独立任务 checkout：变异命令会临时修改校验器，测试结束后恢复。
+Linux 性能探针默认使用 debug 程序，可通过 `TERMINALHOOK_EXE` 指定其他原生程序。
+
 Beta、rc、main 提升 PR 使用轻量 Linux 任务，强制阶段顺序、要求合并树等于来源树，
 并查找验证过完全相同源码树的成功 alpha CI。每个平台的产物、校验和及源码身份必须存在且未过期；
-证据缺失或不匹配都会阻止提升。提升期间不编译 Rust、不重跑协议、不重新标记二进制。
+证据缺失或不匹配都会阻止提升。提升期间不编译项目 Rust 源码、不重跑协议、不重新标记二进制。
 `promotion-validation.json` 保留原验证证据。工作流和测试属于源码树，修改后必须重新验证 alpha。
 
 源码提交排除编译后二进制、运行日志、本地聊天轨迹和凭据；仅 Release 会向独立 marketplace 分支写入二进制。
