@@ -130,8 +130,11 @@ macOS 二进制未签名，也未公证。
 
 分支必需检查保持为 **Quality checks** 和 **Package verification**。两者汇总所有原生结果，
 任一任务失败、取消或意外跳过均不能通过。只有完整的五平台归档和安装证据才能生成
-`release-distributions` 及汇总 `package-verification` 报告。变更使用 PR，push 不重复验证，
-PR 更新后取消过时运行。Actions 固定到提交 SHA。
+`release-distributions` 及汇总 `package-verification` 报告。
+PR 自动验证只在创建 PR（`opened`）或源分支提交变化（`synchronize`）时运行。
+修改标题或说明、重新打开 PR、将草稿标记为可审阅，都不会启动或取消 CI。
+新的源码提交会取消过时运行。分支 push 不单独运行另一套 CI；显式手动运行和可复用工作流调用仍然保留。
+Actions 固定到提交 SHA。
 
 ### 测试分层与门禁
 
