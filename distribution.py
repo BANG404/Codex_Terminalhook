@@ -13,7 +13,7 @@ CHANNELS = {"production": "marketplace", "alpha": "marketplace-alpha",
 COMMON_FILES = {
     ".agents/plugins/marketplace.json", "build-info.json", "platform.json", "LICENSE",
     "README.md", "README.zh-CN.md", "install.ps1", "Enable-DirectTools.ps1",
-    "install.py", "install.sh", "distribution.py",
+    "install.py", "install.sh", "distribution.py", "Start-DesktopSharedHost.ps1",
     "plugins/terminalhook/.codex-plugin/plugin.json", "plugins/terminalhook/.mcp.json",
     "plugins/terminalhook/skills/terminal-wait/SKILL.md",
     "plugins/terminalhook/skills/terminal-wait/scripts/Initialize-Utf8.ps1",
@@ -35,6 +35,10 @@ def binary_name(target=None):
     return "terminalhook.exe" if (target or host_platform()).startswith("windows-") else "terminalhook"
 
 
+def desktop_host_binary_name(target=None):
+    return binary_name(target).replace("terminalhook", "terminalhook-desktop-host")
+
+
 def archive_name(target=None):
     return f"terminalhook-{target or host_platform()}.zip"
 
@@ -48,7 +52,7 @@ def marketplace_branch(channel, target=None):
 
 
 def executable_path(name):
-    return name.endswith(".sh") or name == "plugins/terminalhook/bin/terminalhook"
+    return name.endswith(".sh") or name in {"plugins/terminalhook/bin/terminalhook", "plugins/terminalhook/bin/terminalhook-desktop-host"}
 
 
 def git_mode(name):
@@ -58,14 +62,15 @@ def git_mode(name):
 def mcp_config(target):
     server = {"command": "cmd.exe", "args": ["/d", "/c", "bin\\terminalhook.exe"]} if target.startswith("windows-") else {
         "command": "./bin/terminalhook", "args": []}
-    server.update(cwd=".", startup_timeout_sec=10, tool_timeout_sec=660)
+    server.update(cwd=".", startup_timeout_sec=10, tool_timeout_sec=660,
+                  env_vars=["CODEX_HOME", "CODEX_APP_RUNTIME_CLI_PATH", "TERMINALHOOK_CODEX_BIN", "TERMINALHOOK_CODEX_SOCKET"])
     return {"mcpServers": {"terminalhook": server}}
 
 
 def expected_files(target):
     if target not in PLATFORMS:
         raise ValueError("Unsupported distribution target")
-    return COMMON_FILES | {"plugins/terminalhook/bin/" + binary_name(target)}
+    return COMMON_FILES | {"plugins/terminalhook/bin/" + name for name in (binary_name(target), desktop_host_binary_name(target))}
 
 
 def package_files(archive, info, target="windows-x64"):
@@ -98,8 +103,9 @@ def package_files(archive, info, target="windows-x64"):
         raise ValueError("Packaged MCP launch configuration differs")
     magic = {"windows": (b"MZ",), "linux": (b"\x7fELF",),
              "macos": (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf")}[target.split("-")[0]]
-    if not files["plugins/terminalhook/bin/" + binary_name(target)].startswith(magic):
-        raise ValueError("Missing native binary or wrong binary format")
+    for name in (binary_name(target), desktop_host_binary_name(target)):
+        if not files["plugins/terminalhook/bin/" + name].startswith(magic):
+            raise ValueError("Missing native binary or wrong binary format")
     return files
 
 
