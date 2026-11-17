@@ -61,7 +61,7 @@ python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 ## CI
 
 Alpha PR 在五个原生目标执行格式检查、Clippy、Rust 单元测试、Python 协议与发布策略测试，
-随后执行原生打包和安装验收：
+同时执行原生打包和安装验收：
 
 | 目标 | 原生 runner | 二进制 |
 | --- | --- | --- |
@@ -70,6 +70,16 @@ Alpha PR 在五个原生目标执行格式检查、Clippy、Rust 单元测试、
 | linux-arm64 | ubuntu-24.04-arm | terminalhook |
 | macos-x64 | macos-15-intel | terminalhook |
 | macos-arm64 | macos-15 | terminalhook |
+
+一个 Linux 任务安装锁定的前端依赖、检查类型并构建仪表盘。
+原生测试、打包和 assurance 任务复用同一次运行的 `dashboard-bundle` 产物，
+嵌入前核验源码提交和 HTML 校验和。前端产物就绪后，原生测试与打包同时开始。
+`Quality checks` 仍要求全部测试和 assurance 检查通过；`Package verification`
+等待质量检查与全部原生包完成后才汇总分发产物。即使打包成功，测试失败或取消也不能
+授权交付或发布。并行构建缩短等待时间，但测试失败时可能产生额外构建开销。
+
+独立运行 Assurance 时自行构建仪表盘。仅做阶段提升的 PR 跳过前端和原生构建，
+仍要求源码证据与安全检查通过。
 
 每个二进制均从路径含空格的解压目录运行测试，验证隔离安装、配置保留、Git 迁移和失败恢复、
 启动自动更新、显式升级及缓存中的实际 MCP 启动命令。ZIP 与 Git 树保留可执行权限。
@@ -85,7 +95,7 @@ PR 更新后取消过时运行。Actions 固定到提交 SHA。
 
 测试类型存在重叠：协议套件同时提供黑盒、边界、集成及权限/隔离检查，
 不会将同一套件复制为多个测试任务。可复用的 `assurance.yml` 工作流计入
-**Quality checks**；失败或取消将阻止打包与交付。阶段提升 PR 重新执行安全扫描，
+**Quality checks**；失败或取消将阻止最终产物汇总与交付。阶段提升 PR 重新执行安全扫描，
 原生测试则复用与当前源码树完全一致的 alpha 证据。
 
 | 层次 | 执行时机 | 门禁 |
@@ -235,6 +245,12 @@ npm run test:ui
 `npm run build:ui` 生成已忽略的 `ui/dist/index.html`，脚本、样式、图标均内联。
 Cargo 将该文件嵌入二进制，修改界面后应先重新打包，再编译 Rust。
 打包脚本会自动执行 `npm ci`、类型检查和界面构建。安装后无需 CDN 或前端运行时。
+
+CI 下载共享前端产物后，显式向 `scripts/package.py` 传入 `--prebuilt-dashboard`。
+该选项要求 `ui/dist/index.html` 及其 `build-info.json` 清单与当前源码提交和校验和一致；
+缺失或不匹配时，在 Rust 编译前失败。本地打包默认仍安装依赖、检查类型并重新构建前端。
+需要显式创建和验证可复用产物时，运行 `python3 scripts/dashboard.py build`
+和 `python3 scripts/dashboard.py verify`。
 
 ## 本地构建
 

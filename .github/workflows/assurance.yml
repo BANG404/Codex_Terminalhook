@@ -9,6 +9,10 @@ on:
       deep:
         type: boolean
         default: false
+      dashboard_artifact:
+        description: Dashboard bundle from this run; standalone runs build their own
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       deep:
@@ -110,9 +114,15 @@ jobs:
           fi
           rustup component add llvm-tools-preview
       - name: Build the embedded dashboard
-        run: |
-          npm ci
-          npm run build:ui
+        if: inputs.dashboard_artifact == ''
+        run: python3 scripts/dashboard.py build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.dashboard_artifact != ''
+        with:
+          name: ${{ inputs.dashboard_artifact }}
+          path: ui/dist
+      - name: Verify the dashboard source and checksum
+        run: python3 scripts/dashboard.py verify
       - name: Measure Rust unit test coverage
         run: |
           mkdir -p artifacts/coverage
@@ -159,11 +169,18 @@ jobs:
           if ! cargo mutants --version | grep -F ' 27.1.0'; then
             cargo install cargo-mutants --version 27.1.0 --locked --force
           fi
-      - name: Build the test binary and embedded dashboard
-        run: |
-          npm ci
-          npm run build:ui
-          cargo build --locked
+      - name: Build the embedded dashboard
+        if: inputs.dashboard_artifact == ''
+        run: python scripts/dashboard.py build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.dashboard_artifact != ''
+        with:
+          name: ${{ inputs.dashboard_artifact }}
+          path: ui/dist
+      - name: Verify the dashboard source and checksum
+        run: python scripts/dashboard.py verify
+      - name: Build the test binary
+        run: cargo build --locked
       - name: Require every viable request-boundary mutation to be caught
         run: |
           mkdir -p artifacts
