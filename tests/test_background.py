@@ -374,7 +374,15 @@ class BackgroundTests(unittest.TestCase):
         job = self.submit(program="terminalhook-nonexistent-command-b9d8", args=[])
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
         self.assertEqual(state["status"], "failed")
-        self.assertIn("Failed to start", state["result"]["message"])
+        if os.name == "nt":
+            # The contained Windows launcher starts successfully; the missing
+            # target is reported by that launcher's real exit and stderr.
+            self.assertEqual(state["result"]["status"], "exited")
+            self.assertNotEqual(state["result"]["exit_code"], 0)
+            self.assertTrue(state["result"]["output_tail"]["stderr"].strip())
+        else:
+            self.assertEqual(state["result"]["status"], "error")
+            self.assertIn("Failed to start", state["result"]["message"])
         job = self.submit("print('x'*70000)", until=[{"name": "never", "pattern": "NEVER"}])
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
         self.assertEqual(state["status"], "failed")
