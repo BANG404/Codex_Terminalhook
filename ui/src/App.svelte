@@ -189,20 +189,27 @@
     }
   }
   async function initialize() {
-    if (!loaded) {
+    // A submit/get callback can render a task before the handshake completes,
+    // but only a list snapshot supplies the revision needed to subscribe.
+    while (!stopped && !taskRevision) {
       // A callback can carry newer data while the initial read is in flight.
       const initialRevision = revision;
       try {
         const result = await bridge.tool<TaskList>("list_tasks");
-        if (stopped || revision !== initialRevision) return;
+        if (stopped) return;
+        // Preserve newer callbacks. If one only carried an individual task,
+        // read again to obtain an authoritative snapshot and watch revision.
+        if (revision !== initialRevision) continue;
         accept(result);
         markUpdated();
+        break;
       } catch (cause) {
         if (!stopped && revision === initialRevision) error = String(cause);
+        return;
       }
     }
-    await loadDetail();
     void watchTasks();
+    await loadDetail();
   }
   onMount(() => {
     document.documentElement.classList.toggle(
