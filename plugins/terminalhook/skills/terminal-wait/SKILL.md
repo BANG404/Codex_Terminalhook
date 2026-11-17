@@ -33,9 +33,12 @@ exit code, execution state, and delivery receipt before reporting completion.
 
 ## Dashboard and recovery
 
-`list_tasks` opens the embedded MCP Apps dashboard in compatible hosts. The panel
-subscribes to native state/result events through app-only `watch_tasks` and host
-callbacks. Do not implement a model-driven dashboard refresh loop.
+`submit_task`, `get_task`, `cancel_task`, and `retry_delivery` open an embedded
+single-task panel in compatible MCP Apps hosts. The panel shows only the task
+associated with that tool call. It reads that task with `get_task` and subscribes
+through app-only `watch_tasks` with `task_id`; it never calls `list_tasks`.
+`list_tasks` remains available for explicit chat-wide inspection without opening
+a panel. Do not implement a model-driven refresh loop.
 
 `get_task` is for diagnosis and recovery. `cancel_task` cancels an explicitly
 selected task and cleans up its process tree. `retry_delivery` retries a saved
