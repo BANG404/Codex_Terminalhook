@@ -148,7 +148,9 @@ MCP 断连不会停止已提交的后台 worker；删除状态前应明确取消
 
 Svelte 界面使用 [shadcn-svelte](https://www.shadcn-svelte.com/) 组件，
 不提供任务列表、搜索或状态筛选。点击“详情”展开任务标识、期限和交付回执。
-桌面和窄屏均使用紧凑布局，输出在面板内部滚动。主题跟随宿主，控件支持键盘焦点和无障碍名称。
+桌面和窄屏均使用紧凑布局，输出在面板内部滚动。面板采用透明背景，不绘制卡片外框，
+并请求宿主隐藏 MCP Apps 外框；输出区保留主题底色和边框以便阅读。
+主题跟随宿主，控件支持键盘焦点和无障碍名称。
 
 完成 MCP Apps 握手后，面板等待当前工具的 `ui/notifications/tool-input` 或
 `ui/notifications/tool-result` 回调确定任务，不调用 `list_tasks`。

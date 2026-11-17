@@ -68,8 +68,12 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
   body {
-    @apply bg-background text-foreground;
+    background: transparent;
+  }
+  body {
+    @apply text-foreground;
     margin: 0;
     padding: 8px;
     font-size: 12px;
@@ -90,8 +94,6 @@
 .dashboard {
   max-width: 1000px;
   margin: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
   overflow: hidden;
 }
 .detail-heading,

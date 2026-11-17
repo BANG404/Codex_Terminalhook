@@ -181,8 +181,10 @@ available for explicit chat-wide inspection and does not open a panel.
 The Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/) components.
 There is no task list, search, or status filter. Details expands task identifiers,
 deadlines, and delivery receipts. Output scrolls inside the compact panel on both
-desktop and narrow screens. Theme changes follow the host; controls have keyboard
-focus and accessible names.
+desktop and narrow screens. The panel has a transparent background and no outer
+card border, and requests that the host hide the MCP Apps frame. The output area
+keeps its themed background and border for readability. Theme changes follow the
+host; controls have keyboard focus and accessible names.
 
 After the MCP Apps initialize handshake, the panel waits for the originating
 `ui/notifications/tool-input` or `ui/notifications/tool-result` callback to identify
