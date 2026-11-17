@@ -1,6 +1,7 @@
 """Verify detached execution and the host wake boundary, without model calls."""
 import json
 import queue
+import shutil
 import threading
 import os
 from pathlib import Path
@@ -297,6 +298,137 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(listed[0]["task_id"], job["task_id"])
         self.assertIsNone(listed[0]["timeout_ms"])
         self.await_state(job, lambda s: s["delivery"] == "delivered")
+
+    def test_background_natural_exit_records_failure_and_has_no_session_handles(self):
+        job = self.submit("import sys; print('failed command'); sys.exit(7)")
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "failed")
+        result = state["result"]
+        self.assertEqual(result["status"], "exited")
+        self.assertEqual(result["exit_code"], 7)
+        for obsolete in ("process_id", "cursor", "latest_cursor", "oldest_cursor"):
+            self.assertNotIn(obsolete, result)
+
+    def test_invalid_and_removed_submission_options_never_launch(self):
+        marker = self.root / "must-not-run"
+        base = {"task_key": "invalid", "program": sys.executable, "cwd": str(self.root),
+                "args": ["-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"]}
+        for overrides in ({"mode": "pty"}, {"on_match": "keep_running"},
+                          {"rows": 24}, {"log_dir": str(self.root)}, {"timeout_ms": 0},
+                          {"timeout_ms": 31536000001}, {"streams": ["terminal"]},
+                          {"until": [{"name": "bad", "pattern": "a*"}]},
+                          {"until": [{"name": "bad", "pattern": "["}]},
+                          {"cwd": "relative"}, {"program": ""}, {"task_key": ""}):
+            result = self.call("submit_task", dict(base, **overrides))
+            self.assertEqual(result["status"], "error", result)
+            self.assertFalse(marker.exists(), overrides)
+        self.assertEqual(list((self.root / "tasks").glob("task_*/request.json")), [])
+
+    def test_split_utf8_ansi_and_raw_logs(self):
+        code = "import os,time; os.write(1,bytes.fromhex('1b5b33326de5')); time.sleep(.1); os.write(1,bytes.fromhex('b0b1e7bbaa3a353137331b5b306d')); time.sleep(120)"
+        job = self.submit(code, until=[{"name": "ready", "pattern": "就绪:(\\d+)"}])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        result = state["result"]
+        self.assertEqual(result["match"], "就绪:5173")
+        self.assertEqual(result["captures"], ["5173"])
+        raw = (Path(result["log_dir"]) / "stdout.log").read_bytes()
+        self.assertIn(b"\x1b[32m", raw)
+        self.assertNotIn("\x1b", result["output_tail"]["stdout"])
+
+    def test_stream_isolation_window_matching_and_null_stdin(self):
+        job = self.submit("import sys; print('REA'); print('DY',file=sys.stderr)",
+                          until=[{"name": "never", "pattern": "READY"}])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["result"]["status"], "exited")
+        job = self.submit("import sys,time; print('READY',file=sys.stderr); print('REA'); print('DY'); sys.stdout.flush(); time.sleep(120)",
+                          until=[{"name": "ready", "pattern": "REA\\nDY"}], match_mode="window", streams=["stdout"])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["result"]["match"], "REA\nDY")
+        self.assertEqual(state["result"]["stream"], "stdout")
+        job = self.submit("import sys; print('EOF' if sys.stdin.read() == '' else 'unexpected input')")
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertIn("EOF", state["result"]["output_tail"]["stdout"])
+
+    def test_bounded_output_and_rotating_logs_without_a_match_condition(self):
+        job = self.submit("import sys; sys.stdout.write('汉'*1500000)")
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "completed")
+        result = state["result"]
+        self.assertTrue(result["logs_rotated"])
+        self.assertLessEqual(len(result["output_tail"]["stdout"].encode()), 4096)
+        log = Path(result["log_dir"])
+        self.assertTrue((log / "stdout.log.1").is_file())
+        self.assertLessEqual((log / "stdout.log").stat().st_size, 2*1024*1024)
+
+    def test_natural_exit_cleans_descendants_and_drains_final_output(self):
+        marker = self.root / "child-pid"
+        code = f"import subprocess,sys; from pathlib import Path; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']); Path({str(marker)!r}).write_text(str(p.pid)); print('FINAL OUTPUT',flush=True)"
+        job = self.submit(code)
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["result"]["exit_code"], 0)
+        self.assertIn("FINAL OUTPUT", state["result"]["output_tail"]["stdout"])
+        self.assertTrue(wait_for_exit(int(marker.read_text()), timeout=5))
+
+
+    def test_start_failure_and_long_matching_line_are_saved_failures(self):
+        job = self.submit(program="terminalhook-nonexistent-command-b9d8", args=[])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "failed")
+        self.assertIn("Failed to start", state["result"]["message"])
+        job = self.submit("print('x'*70000)", until=[{"name": "never", "pattern": "NEVER"}])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "failed")
+        self.assertIn("65536", state["result"]["message"])
+        job = self.submit("import sys; sys.stdout.write('x'*70000); print('READY',file=sys.stderr)",
+                          streams=["stderr"], until=[{"name": "ready", "pattern": "READY"}])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["result"]["status"], "matched")
+
+    def test_cancellation_cleans_command_descendants_before_delivery(self):
+        marker = self.root / "cancel-child"
+        code = f"import subprocess,sys,time; from pathlib import Path; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']); Path({str(marker)!r}).write_text(str(p.pid)); time.sleep(120)"
+        job = self.submit(code)
+        self.await_state(job, lambda s: marker.exists())
+        self.call("cancel_task", {"task_id": job["task_id"]})
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "cancelled")
+        self.assertTrue(wait_for_exit(int(marker.read_text()), timeout=5))
+        self.assertTrue(wait_for_exit(state["result"]["os_pid"], timeout=5))
+
+    @unittest.skipUnless(os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "set TERMINALHOOK_LONG_WAIT=1")
+    def test_background_long_wait_survives_disconnect(self):
+        started = time.monotonic()
+        job = self.submit("import time; print('started'); time.sleep(65); print('LONG_TASK_DONE')")
+        self.assertLess(time.monotonic() - started, 10)
+        self.client.close()
+        self.client = Client()
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered", seconds=85)
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual(state["result"]["exit_code"], 0)
+        self.assertGreaterEqual(state["result"]["elapsed_ms"], 64000)
+        self.assertIn("LONG_TASK_DONE", state["result"]["output_tail"]["stdout"])
+        self.assertEqual(len(self.deliveries()), 1)
+
+    @unittest.skipUnless(os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "set TERMINALHOOK_LONG_WAIT=1")
+    def test_background_utf8_long_wait(self):
+        code = "import sys,time\nfor i in range(12):\n print(f'输出{i}: 中文就绪',flush=True); print(f'错误{i}: 中文诊断',file=sys.stderr,flush=True); time.sleep(7.5)"
+        job = self.submit(code)
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered", seconds=110)
+        self.assertEqual(state["result"]["exit_code"], 0)
+        self.assertGreaterEqual(state["result"]["elapsed_ms"], 89000)
+        self.assertEqual(state["result"]["output_tail"]["stdout"].count("中文就绪"), 12)
+        self.assertEqual(state["result"]["output_tail"]["stderr"].count("中文诊断"), 12)
+
+    @unittest.skipUnless(os.name == "nt" and os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "Windows release long wait")
+    def test_background_powershell_utf8_long_wait(self):
+        from test_mcp import UTF8_INIT, ps_literal
+        script = ". " + ps_literal(UTF8_INIT) + "; 1..12 | ForEach-Object { [Console]::Out.WriteLine('中文输出'); [Console]::Error.WriteLine('中文诊断'); Start-Sleep -Milliseconds 7500 }"
+        job = self.submit(program=shutil.which("pwsh") or "powershell", args=["-NoProfile", "-Command", script])
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered", seconds=110)
+        self.assertEqual(state["result"]["exit_code"], 0)
+        self.assertGreaterEqual(state["result"]["elapsed_ms"], 89000)
+        self.assertEqual(state["result"]["output_tail"]["stdout"].count("中文输出"), 12)
+        self.assertEqual(state["result"]["output_tail"]["stderr"].count("中文诊断"), 12)
 
 
 if __name__ == "__main__":

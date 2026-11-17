@@ -24,8 +24,8 @@ without the metadata or daemon is rejected before any command starts. The
 host must expose a shared control endpoint; merely having a desktop app-server
 process or a socket file on disk does not establish availability. A server
 started with the `stdio` transport accepts its owning client's connection only.
-Opening another chat does not add a shared socket. Ordinary terminal tools still
-work without the background bridge.
+Opening another chat does not add a shared socket. This release exposes only
+background-task tools; use the host terminal when the bridge is unavailable.
 
 The proxy executable is selected from `TERMINALHOOK_CODEX_BIN`, then the host's
 `CODEX_APP_RUNTIME_CLI_PATH`, then `codex` on PATH. An explicit
@@ -52,7 +52,7 @@ PATH CLI and desktop CLI failed to connect. Background execution and wake-up
 cannot work in that host configuration through this bridge. No replacement
 daemon is started, no chat is resumed into a different server, and no command
 is launched when preflight fails. Select an already running shared host that
-owns the original chat, or use the ordinary terminal tools. Simulated socket
+owns the original chat, or use the host terminal. Simulated socket
 tests do not prove native desktop callback support.
 
 ### Opt-in Windows Desktop shared host
@@ -114,16 +114,17 @@ interrupted submission must be inspected before choosing a new key.
 
 `timeout_ms` is optional. Omit it or use `null` for no execution deadline; finite
 deadlines accept 1–31536000000 milliseconds (one year). This deadline belongs to
-the worker, independently of the 660-second MCP request timeout. It does not
-change `run_until`/`wait_output` limits. No execution deadline means the worker
+the worker, independently of the 660-second MCP request timeout. No execution deadline means the worker
 waits until a match, exit, cancellation, or worker/host failure; it is not a
 guarantee of surviving a reboot or power loss.
 
 Omit `until` or use `[]` to wait for natural exit. Optional `until`, `streams`,
 and `match_mode` use the terminal tool's regex rules. A match or deadline
 terminates and cleans up the process tree before delivering the result. Passive
-background commands use separate stdout/stderr pipes; interactive input and PTY
-sessions continue to use the ordinary terminal tools.
+background commands use separate stdout/stderr pipes with closed stdin. Use the
+host terminal for interactive input or PTY work. The former `run_until`,
+`wait_output`, `write_input` and `stop_process` interfaces are removed, and direct
+calls to them are rejected.
 
 ## Inspect, cancel, and recover
 
@@ -135,7 +136,9 @@ sessions continue to use the ordinary terminal tools.
 | `retry_delivery {"task_id":"task_…"}` | Retry a saved result that failed before delivery submission; never rerun the command |
 
 Execution and delivery are separate states. `completed` does not mean delivered;
-inspect `delivery` and the actual exit code. Nonzero natural exits are `failed`;
+inspect `delivery` and the actual exit code. Natural results have `status: "exited"`;
+nonzero exits mark the task `failed`. Results contain no connection-local process
+ID or output cursor; task operations use the durable `task_id`.
 deadlines are `timed_out`. Output-condition completion reports `matched` with
 the actual exit code after cleanup, which can reflect deliberate termination.
 

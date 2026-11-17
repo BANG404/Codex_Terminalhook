@@ -90,12 +90,12 @@ PR 更新后取消过时运行。Actions 固定到提交 SHA。
 
 | 层次 | 执行时机 | 门禁 |
 | --- | --- | --- |
-| 边界与白盒 | 每次 alpha PR：Rust 单元测试，覆盖输入上下界及不同进程模式的输出流 | 全部测试通过；`spec.rs`、`matcher.rs` 各自 LLVM 行覆盖率至少 90% |
+| 边界与白盒 | 每次 alpha PR：Rust 单元测试，覆盖后台输入上下界及输出流选择 | 全部测试通过；`spec.rs`、`matcher.rs` 各自 LLVM 行覆盖率至少 90% |
 | 黑盒与集成 | 每次 alpha PR：五平台 stdio MCP、子进程清理、后台桥接、打包/安装/升级测试 | 核心协议及安装场景全部通过 |
 | 浏览器 E2E | 每次 alpha PR 的 Linux x64；Release 发布前再次测试最终包内程序 | 真实 MCP 仪表盘场景通过 |
 | 静态分析与依赖安全 | 每次 PR、Release 验证及每日定时扫描 | Clippy 零警告；Bandit 的 B602/B604/B605/B609 Shell 注入规则通过；Cargo audit 无已知漏洞；npm audit 无高危/严重问题，包含开发依赖 |
-| 变异测试 | 每周、手动 Assurance 开启 `deep`、Release 验证 | `validate_run` / `validate_wait` 的所有可编译变异均被测试捕获；存活变异、超时、基线失败均阻止通过 |
-| 性能 | 与变异验证一起在 Linux x64 执行 | 20 次真实 stdio 子进程启动，各输出 64 KiB、匹配窗口 4 KiB；最近秩法 p95 不超过 3 秒 |
+| 变异测试 | 每周、手动 Assurance 开启 `deep`、Release 验证 | `validate_run` / `validate_deadline` 的所有可编译变异均被测试捕获；存活变异、超时、基线失败均阻止通过 |
+| 性能 | 与变异验证一起在 Linux x64 执行 | 20 次真实后台 worker 完成并向 loopback 宿主交付，各输出 64 KiB、匹配窗口 64 KiB；最近秩法 p95 不超过 3 秒 |
 
 覆盖率门禁逐文件检查原始计数；缺失、重复、无效或未达标证据均失败。
 这里测量的是**行覆盖率**，不代表分支覆盖率或整个应用的覆盖率；测试代码单独存放在
@@ -132,7 +132,7 @@ rustup component add llvm-tools-preview
 mkdir -p artifacts/coverage
 cargo llvm-cov --locked --json --summary-only --output-path artifacts/coverage/llvm.json
 python3 scripts/check_coverage.py artifacts/coverage/llvm.json
-cargo mutants --in-place --file src/spec.rs --re 'validate_(run|wait)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
+cargo mutants --in-place --file src/spec.rs --re 'validate_(run|deadline)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
 cargo build --locked
 python3 scripts/verify_performance.py
 ```
@@ -167,8 +167,8 @@ GitHub Actions 选择 **Release**，指定工作流分支及匹配渠道（`prod
 四个阶段共用同一套五目标矩阵。
 
 工作流检查分支、复用完整 alpha 源码验证，为每个目标构建一次最终渠道版本。每个包内二进制均通过
-协议、安装、Git 更新、显式 65 秒等待及 90 秒交互式 UTF-8 回归。Windows 额外执行
-PowerShell UTF-8 长等待回归。阶段提升不会将 alpha 二进制重新标记为稳定版。
+协议、安装、Git 更新、65 秒后台任务跨越 MCP 断连及 90 秒 UTF-8 输出回归。Windows 额外执行
+PowerShell UTF-8 后台长任务回归。阶段提升不会将 alpha 二进制重新标记为稳定版。
 
 发布前汇总核验全部源码身份、校验和、原生启动配置、二进制格式和可执行权限。
 发布版包含五份 `terminalhook-<platform>.zip`、覆盖五份归档的单个 `SHA256SUMS.txt`，

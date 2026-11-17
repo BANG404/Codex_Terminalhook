@@ -165,7 +165,7 @@ jobs:
           npm run build:ui
           cargo build --locked
       - name: Require every viable request-boundary mutation to be caught
-        run: cargo mutants --in-place --file src/spec.rs --re 'validate_(run|wait)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
+        run: cargo mutants --in-place --file src/spec.rs --re 'validate_(run|deadline)' --timeout 60 --build-timeout 180 --output artifacts/mutation -- --locked
       - name: Verify bounded process-match latency
         if: ${{ !cancelled() }}
         run: python scripts/verify_performance.py
