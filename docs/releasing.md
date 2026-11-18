@@ -134,6 +134,21 @@ deadline is one hour, adjustable with `--timeout` in seconds. A stale lock must
 be inspected before removal. Run the focused regressions with
 `python -m unittest discover -s tests -p test_delivery.py -v`.
 
+### CI and CD follow-up
+
+Keep following the authorized delivery through its verified outcome. Use the
+source SHA, run ID, and attempt to locate the earliest failed prerequisite.
+Fix recoverable failures within the same task and verify the new attempt.
+After a timeout, reconcile the original run and any completed writes before
+resuming. Await an external prerequisite with an event or a bounded wait
+when possible. Escalate when recovery requires credentials, review, or
+authorization for a new deployment or release.
+
+Review the run graph and job timings while following CI or CD. Put inexpensive
+checks before costly dependent work, share artifacts when their source and
+checksums can be verified, and run independent jobs in parallel. Verify any
+optimization against the actual gates and retain the required evidence.
+
 ## CI
 
 Alpha PRs run formatting, Clippy, Rust unit tests, and Python protocol/release-policy
@@ -147,10 +162,12 @@ tests on five native targets, alongside native package and installation checks:
 | macos-x64 | macos-15-intel | terminalhook |
 | macos-arm64 | macos-15 | terminalhook |
 
-One Linux job installs the locked frontend dependencies, checks types, and builds
-the dashboard. Native tests, packages, and assurance jobs reuse its `dashboard-bundle`
-artifact from the same run, verifying the source revision and HTML checksum before
-embedding it. Native tests and package builds start together after this bundle is
+One Linux job audits the frontend lockfile before installing dependencies,
+checking types, and building the dashboard. A failed audit stops the native
+matrix before it starts. The security job still produces a fresh audit report
+for each assurance run. Native tests, packages, and assurance jobs reuse the
+`dashboard-bundle` artifact from the same run, verifying the source revision and
+HTML checksum before embedding it. Native tests and package builds start together after this bundle is
 ready. `Quality checks` still requires every test and assurance check;
 `Package verification` waits for both quality and every native package before
 assembling distributions. Failed or cancelled tests cannot authorize delivery or
@@ -185,6 +202,10 @@ and permission/isolation checks; they are not separate copies of the same suite.
 The reusable `assurance.yml` workflow contributes to **Quality checks**. Its
 failure or cancellation blocks final package assembly and delivery. Promotion PRs rerun fresh
 security scans while reusing the exact alpha tree's native test evidence.
+
+The dashboard's build dependencies temporarily use the pinned
+`@ryotsu/picomatch@4.0.7-a` backport for CVE-2026-112366. Remove the override
+when the upstream package publishes a fixed release that passes the audit.
 
 | Layer | Execution | Gate |
 | --- | --- | --- |
