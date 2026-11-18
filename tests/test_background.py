@@ -291,23 +291,40 @@ class BackgroundTests(unittest.TestCase):
     def test_missing_host_context_and_unavailable_host_do_not_launch(self):
         missing = self.call("submit_task", {}, owner=None)
         self.assertIn("threadId", missing["message"])
-        (self.root / "offline").touch()
+        (self.root / "unloaded").touch()
         marker = self.root / "should-not-exist"
         result = self.call("submit_task", {"task_key": "blocked", "program": sys.executable,
                            "args": ["-c", f"open({str(marker)!r},'w').close()"], "cwd": str(self.root)})
         self.assertIn("not loaded", result["message"])
         self.assertFalse(marker.exists())
 
+    def test_completion_resumes_unloaded_chat_and_delivers_once(self):
+        release = self.root / "release-task"
+        job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('saved result')")
+        (self.root / "unloaded").touch()
+        self.client.close()
+        release.touch()
+        self.client = Client()
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual([event["task_id"] for event in self.deliveries()], [job["task_id"]])
+        self.assertIn("saved result", state["result"]["output_tail"]["stdout"])
+        retry = self.call("retry_delivery", {"task_id": job["task_id"]})
+        self.assertEqual(retry["delivery"], "delivered")
+        self.assertEqual(len(self.deliveries()), 1)
+
     def test_failed_delivery_retries_saved_result_without_rerunning(self):
         release = self.root / "release-task"
         job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('saved result')")
-        (self.root / "offline").touch()
+        (self.root / "unloaded").touch()
+        (self.root / "reject-resume").touch()
         release.touch()
-        self.await_state(job, lambda s: s["delivery"] == "failed")
+        state = self.await_state(job, lambda s: s["delivery"] == "failed")
+        self.assertIn("original thread cannot be resumed", state["delivery_error"])
         self.assertEqual(self.deliveries(), [])
         # The failure is saved before the worker drops its delivery-owner lock.
         self.assertTrue(wait_for_exit(job["worker_pid"], timeout=10))
-        (self.root / "offline").unlink()
+        (self.root / "unloaded").unlink()
         result = self.call("retry_delivery", {"task_id": job["task_id"]})
         self.assertEqual(result.get("delivery"), "delivered", result)
         self.assertEqual(len(self.deliveries()), 1)

@@ -88,6 +88,7 @@ def exchange(reader, writer):
     writer.flush()
     root = Path(os.environ["TERMINALHOOK_FAKE_STATE_DIR"])
     owner = os.environ["TERMINALHOOK_FAKE_THREAD_ID"]
+    resumed = False
     while True:
         message = receive(reader)
         method = message.get("method")
@@ -95,9 +96,19 @@ def exchange(reader, writer):
             continue
         if method == "initialize":
             result = {"userAgent": "TerminalHook fake host", "capabilities": {}}
-        elif method == "thread/loaded/list":
-            result = {"data": [] if (root / "offline").exists() else [owner]}
         elif method == "thread/read":
+            assert message["params"] == {"threadId": owner, "includeTurns": False}
+            status = "notLoaded" if (root / "unloaded").exists() else "idle"
+            result = {"thread": {"id": owner, "cwd": str(root), "status": {"type": status}}}
+        elif method == "thread/resume":
+            assert message["params"] == {"threadId": owner, "excludeTurns": True}
+            assert (root / "unloaded").exists() and not resumed
+            if (root / "reject-resume").exists():
+                send(writer, {"id": message["id"], "error": {
+                    "code": -32600, "message": "original thread cannot be resumed",
+                }})
+                continue
+            resumed = True
             result = {"thread": {"id": owner, "cwd": str(root), "status": {"type": "idle"}}}
         elif method == "command/exec":
             params = message["params"]
@@ -107,6 +118,7 @@ def exchange(reader, writer):
             result = {"exitCode": launched.returncode, "stdout": launched.stdout, "stderr": launched.stderr}
         elif method == "turn/start":
             params = message["params"]
+            assert resumed or not (root / "unloaded").exists()
             assert params["threadId"] == owner
             assert params["input"] == []
             output = json.loads(params["toolOutput"]["output"])

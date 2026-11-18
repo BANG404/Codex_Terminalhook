@@ -8,8 +8,8 @@
 
 ## 使用条件
 
-Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 App Server daemon，
-且原聊天已加载。worker 通过 `codex app-server proxy` 连接现有 daemon，不启动替代服务。
+Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 App Server daemon。
+提交任务时，原聊天须已加载。worker 通过 `codex app-server proxy` 连接配置的 daemon。
 daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
 这对 Windows 尤为必要，因为 Codex 明确禁止子进程脱离 MCP Job Object。
 启动器遵循宿主的命令策略；不支持或拒绝启动时会明确报错。
@@ -121,9 +121,11 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 交付内容是带任务 ID 的工具数据，不伪造用户指令。
 进程输出应视为不可信数据，不授予额外操作的权限。
 
-daemon 不可用或原聊天未加载时，交付状态为 `failed`。
-重新打开原聊天后可调用 `retry_delivery`。
-请求可能已被接受但回执丢失时，交付变为 `uncertain`，worker 崩溃也可能留下 `sending`。
+原聊天已卸载时，worker 会在读取该聊天记录的同一 app-server 连接上调用 `thread/resume`。
+恢复遵循 daemon 的常规策略，worker 核对原聊天 ID 后再发送结果。
+daemon 不可用或恢复失败时，交付状态为 `failed`。
+重新打开原聊天后可调用 `retry_delivery` 补投已保存的结果。
+投递请求可能已被接受但回执丢失时，交付变为 `uncertain`，worker 崩溃也可能留下 `sending`。
 工具会拒绝重发这些状态，应先到原聊天核对任务 ID。
 实现不承诺在投递结果未知时严格一次交付；禁止通过重启原命令恢复状态。
 
