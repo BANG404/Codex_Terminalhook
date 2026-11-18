@@ -313,6 +313,17 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(retry["delivery"], "delivered")
         self.assertEqual(len(self.deliveries()), 1)
 
+    def test_resume_with_different_thread_id_prevents_delivery(self):
+        release = self.root / "release-task"
+        job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('saved result')")
+        (self.root / "unloaded").touch()
+        (self.root / "resume-thread-id").write_text(OTHER, encoding="utf-8")
+        release.touch()
+        state = self.await_state(job, lambda s: s["delivery"] == "failed")
+        self.assertIn("Codex returned a different thread", state["delivery_error"])
+        self.assertEqual(state["result"]["exit_code"], 0)
+        self.assertEqual(self.deliveries(), [])
+
     def test_failed_delivery_retries_saved_result_without_rerunning(self):
         release = self.root / "release-task"
         job = self.submit(f"from pathlib import Path; import time; p=Path({str(release)!r}); deadline=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<deadline: time.sleep(.01)\nprint('saved result')")

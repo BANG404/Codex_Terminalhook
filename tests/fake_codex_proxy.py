@@ -109,7 +109,9 @@ def exchange(reader, writer):
                 }})
                 continue
             resumed = True
-            result = {"thread": {"id": owner, "cwd": str(root), "status": {"type": "idle"}}}
+            alternate_id = root / "resume-thread-id"
+            thread_id = alternate_id.read_text(encoding="utf-8") if alternate_id.exists() else owner
+            result = {"thread": {"id": thread_id, "cwd": str(root), "status": {"type": "idle"}}}
         elif method == "command/exec":
             params = message["params"]
             environment = dict(os.environ, **params.get("env", {}))
