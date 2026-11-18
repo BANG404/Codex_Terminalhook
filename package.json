@@ -11,6 +11,9 @@
     "check:ui": "svelte-check --tsconfig tsconfig.json",
     "test:ui": "node scripts/verify_ui.mjs"
   },
+  "overrides": {
+    "picomatch": "npm:@ryotsu/picomatch@4.0.7-a"
+  },
   "devDependencies": {
     "@internationalized/date": "3.12.0",
     "@lucide/svelte": "1.73.0",

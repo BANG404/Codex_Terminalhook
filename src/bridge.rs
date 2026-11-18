@@ -100,23 +100,38 @@ impl Bridge {
     }
 
     pub async fn verify_thread(&mut self, thread_id: &str) -> Result<Value, String> {
-        let loaded = self.rpc("thread/loaded/list", json!({})).await?;
-        if !loaded["data"]
-            .as_array()
-            .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(thread_id)))
-        {
-            return Err("original thread is not loaded in this Codex daemon; reopen it before retrying delivery".into());
+        let thread = self.read_thread(thread_id).await?;
+        if !thread_is_loaded(&thread)? {
+            return Err("original thread is not loaded in this Codex daemon; reopen it before submitting background work".into());
         }
+        Ok(thread)
+    }
+
+    async fn read_thread(&mut self, thread_id: &str) -> Result<Value, String> {
         let result = self
             .rpc(
                 "thread/read",
                 json!({"threadId":thread_id,"includeTurns":false}),
             )
             .await?;
-        if result["thread"]["id"] != thread_id {
-            return Err("Codex returned a different thread".into());
+        Ok(verified_thread(&result, thread_id)?.clone())
+    }
+
+    pub async fn prepare_delivery(&mut self, thread_id: &str) -> Result<(), String> {
+        let thread = self.read_thread(thread_id).await?;
+        if !thread_is_loaded(&thread)? {
+            // Only the daemon that resolved the original thread handles its resume.
+            let resumed = self
+                .rpc(
+                    "thread/resume",
+                    json!({"threadId":thread_id,"excludeTurns":true}),
+                )
+                .await?;
+            if !thread_is_loaded(verified_thread(&resumed, thread_id)?)? {
+                return Err("Codex did not load the original thread after resuming it".into());
+            }
         }
-        Ok(result["thread"].clone())
+        Ok(())
     }
 
     pub async fn deliver(
@@ -164,6 +179,22 @@ impl Bridge {
     pub async fn close(mut self) {
         let _ = timeout(Duration::from_secs(2), self.socket.close(None)).await;
         let _ = self.proxy.stop().await;
+    }
+}
+
+fn verified_thread<'a>(result: &'a Value, thread_id: &str) -> Result<&'a Value, String> {
+    let thread = &result["thread"];
+    if thread["id"] != thread_id {
+        return Err("Codex returned a different thread".into());
+    }
+    Ok(thread)
+}
+
+fn thread_is_loaded(thread: &Value) -> Result<bool, String> {
+    match thread["status"]["type"].as_str() {
+        Some("idle" | "active" | "systemError") => Ok(true),
+        Some("notLoaded") => Ok(false),
+        _ => Err("Codex returned an unknown thread status".into()),
     }
 }
 
