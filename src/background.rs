@@ -521,7 +521,7 @@ pub async fn retry_delivery(id: &str, thread_id: &str) -> Result<Value, String> 
 async fn deliver(path: &Path, job: &Job, state: &mut Value) -> Result<(), String> {
     let prepared = async {
         let mut bridge = Bridge::connect().await?;
-        bridge.verify_thread(&job.thread_id).await?;
+        bridge.prepare_delivery(&job.thread_id).await?;
         Ok::<_, String>(bridge)
     }
     .await;
