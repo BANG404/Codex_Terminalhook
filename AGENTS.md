@@ -32,15 +32,23 @@ open the pull request, or merge it after its actual required CI checks succeed:
    Honor review and branch protections. Never force push, bypass protections,
    or push alpha directly. Verify that the actual two-parent merge commit
    retains the submitted source as its second parent before declaring success.
-5. Report the pull request URL, merge commit, and actual validation/CI state. If submission is
-   blocked by authentication, network access, conflicts, or failed checks,
-   report the concrete blocker and retain the work for recovery; do not claim
-   the task was submitted.
+5. Diagnose and repair recoverable delivery failures within the authorized
+   scope, then continue through verified merge. Report the pull request URL,
+   merge commit, and actual validation state. Use an event or a bounded wait
+   for an external prerequisite when possible. Preserve the work and pause
+   when recovery requires human input or approval.
 
 Keep one waiter per PR across worktrees. After an interrupted follow-up, use the
 printed `scripts/deliver.py follow <number> --head <sha> --merge` command; do not
 blindly replay commits, pushes, PR creation, or merge writes. A changed source
 requires new checks. Preserve failed PRs and their source for repair.
+
+When following CI or an authorized CD, inspect the actual job graph, timings,
+and first failing prerequisite. Prefer early inexpensive gates, shared verified
+artifacts, and parallel independent jobs. Fix measurable waste or recoverable
+failures within scope and verify the new run. Reconcile the original remote
+state before retrying a write. Escalate decisions needing credentials, review,
+protection changes, or authorization for a new deployment or release.
 
 Alpha advancement alone does not invalidate successful checks for the original
 PR HEAD. Verify the CI package report's tested merge parents and tree, and require

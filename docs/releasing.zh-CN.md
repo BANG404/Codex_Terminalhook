@@ -114,6 +114,15 @@ python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 `--timeout` 指定秒数。残留锁须先核实再删除。运行针对性回归测试：
 `python -m unittest discover -s tests -p test_delivery.py -v`。
 
+### CI 和 CD 跟进
+
+持续跟进已授权的交付，直到核实最终结果。根据源码 SHA、运行 ID 和尝试编号找到最先失败的前置任务，
+在当前任务范围内修复可恢复的故障，再验证新的运行。等待超时后，先核对原运行和已经完成的写入，再恢复跟进。
+依赖外部状态时，优先使用事件或有界等待。需要凭据、审阅或新的部署与发布授权时，再交给人工处理。
+
+跟进期间检查任务依赖图和实际耗时，将低成本检查放在昂贵的依赖任务之前，复用可核对来源与校验和的产物，
+并行执行相互独立的任务。根据实际门禁验证每项优化，保留必需的证据。
+
 ## CI
 
 Alpha PR 在五个原生目标执行格式检查、Clippy、Rust 单元测试、Python 协议与发布策略测试，
@@ -127,7 +136,8 @@ Alpha PR 在五个原生目标执行格式检查、Clippy、Rust 单元测试、
 | macos-x64 | macos-15-intel | terminalhook |
 | macos-arm64 | macos-15 | terminalhook |
 
-一个 Linux 任务安装锁定的前端依赖、检查类型并构建仪表盘。
+一个 Linux 任务先审计锁定的前端依赖，再安装、检查类型并构建仪表盘。审计失败会阻止原生矩阵启动。
+安全任务仍在每次 assurance 运行中生成新的审计报告。
 原生测试、打包和 assurance 任务复用同一次运行的 `dashboard-bundle` 产物，
 嵌入前核验源码提交和 HTML 校验和。前端产物就绪后，原生测试与打包同时开始。
 `Quality checks` 仍要求全部测试和 assurance 检查通过；`Package verification`
@@ -156,6 +166,9 @@ Actions 固定到提交 SHA。
 不会将同一套件复制为多个测试任务。可复用的 `assurance.yml` 工作流计入
 **Quality checks**；失败或取消将阻止最终产物汇总与交付。阶段提升 PR 重新执行安全扫描，
 原生测试则复用与当前源码树完全一致的 alpha 证据。
+
+仪表盘构建依赖暂时固定使用 `@ryotsu/picomatch@4.0.7-a` 的 CVE-2026-112366 回移修复。
+上游发布修复版本且审计通过后，移除该覆盖项。
 
 | 层次 | 执行时机 | 门禁 |
 | --- | --- | --- |

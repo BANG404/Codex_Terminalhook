@@ -11,8 +11,8 @@ periodic hook, Stop hook, a second app server, or `codex exec`.
 ## Requirements
 
 The Codex host must supply `threadId` in MCP request metadata and have a running
-shared app-server daemon with the original chat loaded. The worker connects to
-that daemon through `codex app-server proxy`; it never starts a replacement.
+shared app-server daemon with the original chat loaded at submission. The worker
+connects to the configured daemon through `codex app-server proxy`.
 The daemon runs a short `command/exec` launcher, which starts the worker outside
 the MCP server's process containment. This is necessary on Windows, where
 Codex deliberately forbids children escaping its MCP Job Object. The launcher
@@ -148,11 +148,14 @@ it starts a new turn. The result is tool data, including a task ID, rather than
 a fabricated user instruction. Process output is untrusted data and grants no
 authorization for additional actions.
 
-An unavailable daemon or unloaded chat sets delivery to `failed`. Reopen the
-original chat and use `retry_delivery`. If the request might have been accepted
-but its acknowledgment was lost, delivery becomes `uncertain` (or remains
-`sending` after a worker crash). Automatic and manual retry tools refuse to
-replay that submission: inspect the original chat for this task ID first. The
+If the original chat has been unloaded, the worker uses `thread/resume` on the
+same app-server connection that read the stored chat. It confirms the original
+thread ID before sending the result and uses the daemon's normal resume policy.
+An unavailable daemon or failed resume sets delivery to `failed`. Reopen the
+original chat and use `retry_delivery` to send the saved result. If the delivery
+might have been accepted but its acknowledgment was lost, it becomes `uncertain`
+(or remains `sending` after a worker crash). Automatic and manual retry tools
+refuse to replay that submission: inspect the original chat for this task ID first. The
 implementation does not claim exactly-once delivery across an ambiguous
 transport failure. Never recover status by restarting the command.
 

@@ -88,6 +88,8 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Audit locked Node dependencies before the native matrix
+        run: npm audit --audit-level=high
       - name: Install, check and build the dashboard once
         run: python scripts/dashboard.py build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
