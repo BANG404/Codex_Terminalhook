@@ -30,6 +30,9 @@ rejected. Retain the task ID and state directory. An interrupted or ambiguous
 submission requires inspecting its saved state before choosing any new key.
 A matched line does not prove successful natural exit; inspect the actual result,
 exit code, execution state, and delivery receipt before reporting completion.
+For delivery, the existing daemon can resume the stored original chat on the
+same connection. An unavailable daemon or a failed resume leaves the saved
+result available for `retry_delivery`.
 
 ## Dashboard and recovery
 
