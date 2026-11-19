@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import zipfile
 
-from distribution import archive_name, binary_name, desktop_host_binary_name, executable_path, host_platform, mcp_config
+from distribution import MACOS_DESKTOP_LAUNCHER, archive_name, binary_name, desktop_host_binary_name, executable_path, host_platform, mcp_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,6 +44,8 @@ def main():
                            ("examples/package/README.md", "README.md"), ("examples/package/README.zh-CN.md", "README.zh-CN.md"),
                            ("LICENSE", "LICENSE"), ("dist/build-info.json", "build-info.json")):
         shutil.copyfile(ROOT / source, destination / name)
+    if target.startswith("macos-"):
+        shutil.copyfile(ROOT / "scripts" / MACOS_DESKTOP_LAUNCHER, destination / MACOS_DESKTOP_LAUNCHER)
     (destination / "platform.json").write_text(json.dumps({"platform": target}) + "\n", encoding="utf-8")
     archive = dist / archive_name(target)
     stamp = datetime.datetime.fromtimestamp(max(315532800, info["sourceDateEpoch"]), datetime.timezone.utc).timetuple()[:6]

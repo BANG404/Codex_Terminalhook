@@ -11,7 +11,7 @@ use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
 type Socket = WebSocketStream<Join<ChildStdout, ChildStdin>>;
 mod proxy;
-const RPC_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const RPC_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct Bridge {
     socket: Socket,
@@ -65,34 +65,56 @@ impl Bridge {
         }
     }
 
-    pub async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, String> {
+    pub(crate) async fn request(&mut self, method: &str, params: Value) -> Result<u64, String> {
         self.next_id += 1;
         let id = self.next_id;
         self.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
             .await?;
-        let result = timeout(RPC_TIMEOUT, async {
-            while let Some(message) = self.socket.next().await {
-                match message.map_err(|e| format!("Codex transport failed: {e}"))? {
-                    Message::Text(text) => {
-                        let value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-                        if value.get("id") == Some(&json!(id)) && value.get("method").is_none() {
-                            if let Some(error) = value.get("error") {
-                                return Err(format!("Codex {method} rejected: {error}"));
-                            }
-                            return value.get("result").cloned().ok_or_else(|| "Codex response has no result".into());
-                        }
-                        // This observer cannot answer approvals or other clients' requests.
-                        if let (Some(request_id), Some(_)) = (value.get("id"), value.get("method")) {
-                            self.socket.send(Message::Text(json!({"id":request_id,"error":{"code":-32601,"message":"TerminalHook does not handle client requests"}}).to_string().into())).await.map_err(|e| e.to_string())?;
-                        }
+        Ok(id)
+    }
+
+    pub(crate) async fn receive(&mut self) -> Result<Value, String> {
+        while let Some(message) = self.socket.next().await {
+            match message.map_err(|e| format!("Codex transport failed: {e}"))? {
+                Message::Text(text) => {
+                    let value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                    // This observer cannot answer approvals or other clients' requests.
+                    if let (Some(id), Some(_)) = (value.get("id"), value.get("method")) {
+                        self.send(json!({"id":id,"error":{"code":-32601,"message":"TerminalHook does not handle client requests"}})).await?;
+                    } else {
+                        return Ok(value);
                     }
-                    Message::Ping(data) => self.socket.send(Message::Pong(data)).await.map_err(|e| e.to_string())?,
-                    Message::Close(_) => return Err("Codex connection closed".into()),
-                    _ => {}
+                }
+                Message::Ping(data) => self
+                    .socket
+                    .send(Message::Pong(data))
+                    .await
+                    .map_err(|e| e.to_string())?,
+                Message::Close(_) => return Err("Codex connection closed".into()),
+                _ => {}
+            }
+        }
+        Err("Codex connection ended".into())
+    }
+
+    pub async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let id = self.request(method, params).await?;
+        let result = timeout(RPC_TIMEOUT, async {
+            loop {
+                let value = self.receive().await?;
+                if value["id"].as_u64() == Some(id) {
+                    if let Some(error) = value.get("error") {
+                        return Err(format!("Codex {method} rejected: {error}"));
+                    }
+                    return value
+                        .get("result")
+                        .cloned()
+                        .ok_or_else(|| "Codex response has no result".into());
                 }
             }
-            Err("Codex connection ended".into())
-        }).await.unwrap_or_else(|_| Err(format!("Codex {method} timed out")));
+        })
+        .await
+        .unwrap_or_else(|_| Err(format!("Codex {method} timed out")));
         match result {
             Ok(value) => Ok(value),
             Err(error) => Err(self.proxy.failure(error).await),
@@ -146,6 +168,7 @@ impl Bridge {
         }})).await
     }
 
+    #[cfg(not(target_os = "macos"))]
     pub async fn launch_worker(&mut self, path: &std::path::Path) -> Result<u32, String> {
         let environment: serde_json::Map<String, Value> = std::env::vars()
             .filter(|(key, _)| {

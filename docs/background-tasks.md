@@ -13,12 +13,21 @@ periodic hook, Stop hook, a second app server, or `codex exec`.
 The Codex host must supply `threadId` in MCP request metadata and have a running
 shared app-server daemon with the original chat loaded at submission. The worker
 connects to the configured daemon through `codex app-server proxy`.
-The daemon runs a short `command/exec` launcher, which starts the worker outside
+On Windows and Linux the daemon runs a short `command/exec` launcher, which starts the worker outside
 the MCP server's process containment. This is necessary on Windows, where
 Codex deliberately forbids children escaping its MCP Job Object. The launcher
 uses the host's command policy; an unsupported or denied launch fails visibly.
 Windows workers inherit no launcher handles, so open task streams cannot delay
 the short launch acknowledgment.
+
+On macOS the plugin starts the detached worker with its existing access to
+task storage. The worker asks the same App Server to run the requested command
+under its configured permissions. It streams stdout and stderr into the task
+logs and saves the host's exit code. The host does not return an OS PID on this
+route, so `result.os_pid` is null. The command needs the shared App Server
+connection for its lifetime. TerminalHook can save a connection failure if the
+host exits before the command finishes.
+
 `check_background {}` checks this route without starting a model turn. A host
 without the metadata or daemon is rejected before any command starts. The
 host must expose a shared control endpoint; merely having a desktop app-server
@@ -54,6 +63,10 @@ daemon is started, no chat is resumed into a different server, and no command
 is launched when preflight fails. Select an already running shared host that
 owns the original chat, or use the host terminal. Simulated socket
 tests do not prove native desktop callback support.
+
+On macOS, Desktop 26.1111.71704 (bundled CLI 0.169.1) also ran the original
+chat over stdio. The default control socket was absent. The bundled proxy
+exited with `No such file or directory` before the WebSocket handshake.
 
 ### Opt-in Windows Desktop shared host
 
@@ -92,6 +105,32 @@ that policy. Desktop versions with incompatible CLI protocols fail visibly.
 On Windows, an OS-owned process job removes the core, proxy, and delegated CLI
 descendants even if Desktop forcibly terminates the adapter. Explicit worker
 breakaway remains permitted; closing the UI does not cancel a detached task.
+
+### Opt-in macOS Desktop shared host
+
+Quit Codex Desktop and run the launcher from the extracted macOS package:
+
+```sh
+sh ./Start-DesktopSharedHost.sh
+```
+
+The launcher defaults to `/Applications/ChatGPT.app`. Use `--desktop-app` for a
+different installation. From a source checkout, build the adapter and run
+`sh scripts/Start-DesktopSharedHost.sh --host-adapter target/debug/terminalhook-desktop-host`.
+The launcher uses the selected app's bundled CLI and passes the override through Launch
+Services for this launch only. It leaves a running app untouched.
+
+The adapter gives Desktop and TerminalHook one shared core, as on Windows.
+Reopen the original chat in this Desktop session and call `check_background` to
+verify it before submitting work. A normal Desktop launch restores the default
+transport. To use a custom `CODEX_HOME`, set it for the launcher. If that home
+makes the Unix socket path too long, set `TERMINALHOOK_DESKTOP_SOCKET` to a
+shorter absolute path inside a dedicated private directory. The adapter creates
+missing directories with owner-only permissions and rejects an occupied
+endpoint, including an active socket behind a macOS alias. When the alias is
+stale, the adapter removes the link and leaves the target to the native CLI.
+A normal shutdown or termination signal stops the adapter's core and proxy.
+After a force kill, a live endpoint still blocks a second launch.
 
 ## Submit once, then wait for delivery
 

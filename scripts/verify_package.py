@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 
-from distribution import archive_name, binary_name, desktop_host_binary_name, extract_package, host_platform, mcp_config
+from distribution import MACOS_DESKTOP_LAUNCHER, archive_name, binary_name, desktop_host_binary_name, extract_package, host_platform, mcp_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,6 +34,10 @@ def main():
         assert "hooks" not in manifest
         assert not (plugin / "hooks").exists(), "Obsolete hooks must not ship"
         assert (unpacked / "Enable-DirectTools.ps1").is_file()
+        if target.startswith("macos-"):
+            launcher = unpacked / MACOS_DESKTOP_LAUNCHER
+            assert os.access(launcher, os.X_OK), "Extracted Desktop launcher is not executable"
+            assert launcher.read_bytes() == (ROOT / "scripts" / MACOS_DESKTOP_LAUNCHER).read_bytes()
         assert json.loads((unpacked / "platform.json").read_text())["platform"] == target
         assert json.loads((plugin / ".mcp.json").read_text()) == mcp_config(target)
         binary = plugin / "bin" / binary_name(target)

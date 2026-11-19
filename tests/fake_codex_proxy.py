@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import socketserver
 import struct
@@ -77,6 +78,50 @@ def send(writer, value):
     writer.flush()
 
 
+def stop_command(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def stream_command(request, reply):
+    params = request["params"]
+    assert "sandboxPolicy" not in params and "permissionProfile" not in params
+    assert params["disableTimeout"] and params["disableOutputCap"]
+    try:
+        process = subprocess.Popen(
+            params["command"], cwd=params["cwd"], env=dict(os.environ, **params.get("env", {})),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+    except OSError as error:
+        reply({"id": request["id"], "error": {"code": -32603, "message": str(error)}})
+        return None
+
+    def output(pipe, stream):
+        with pipe:
+            while data := os.read(pipe.fileno(), 4096):
+                reply({"method": "command/exec/outputDelta", "params": {
+                    "processId": params["processId"], "stream": stream,
+                    "deltaBase64": base64.b64encode(data).decode(), "capReached": False,
+                }})
+
+    def finish():
+        readers = [threading.Thread(target=output, args=(process.stdout, "stdout"), daemon=True),
+                   threading.Thread(target=output, args=(process.stderr, "stderr"), daemon=True)]
+        for reader in readers:
+            reader.start()
+        code = process.wait()
+        stop_command(process)
+        for reader in readers:
+            reader.join()
+        reply({"id": request["id"], "result": {"exitCode": code, "stdout": "", "stderr": ""}})
+
+    threading.Thread(target=finish, daemon=True).start()
+    return process
+
+
 def exchange(reader, writer):
     headers = b""
     while not headers.endswith(b"\r\n\r\n"):
@@ -88,6 +133,22 @@ def exchange(reader, writer):
     writer.flush()
     root = Path(os.environ["TERMINALHOOK_FAKE_STATE_DIR"])
     owner = os.environ["TERMINALHOOK_FAKE_THREAD_ID"]
+    lock = threading.Lock()
+
+    def reply(value):
+        with lock:
+            send(writer, value)
+
+    commands = {}
+    try:
+        handle_requests(reader, reply, root, owner, commands)
+    finally:
+        for process in commands.values():
+            if process is not None and process.poll() is None:
+                stop_command(process)
+
+
+def handle_requests(reader, reply, root, owner, commands):
     resumed = False
     while True:
         message = receive(reader)
@@ -104,7 +165,7 @@ def exchange(reader, writer):
             assert message["params"] == {"threadId": owner, "excludeTurns": True}
             assert (root / "unloaded").exists() and not resumed
             if (root / "reject-resume").exists():
-                send(writer, {"id": message["id"], "error": {
+                reply({"id": message["id"], "error": {
                     "code": -32600, "message": "original thread cannot be resumed",
                 }})
                 continue
@@ -114,10 +175,24 @@ def exchange(reader, writer):
             result = {"thread": {"id": thread_id, "cwd": str(root), "status": {"type": "idle"}}}
         elif method == "command/exec":
             params = message["params"]
+            if params.get("streamStdoutStderr"):
+                commands[params["processId"]] = stream_command(message, reply)
+                continue
+            if sys.platform == "darwin":
+                # A sandboxed launcher cannot create the coordinator's worker log.
+                reply({"id": message["id"], "result": {
+                    "exitCode": 1, "stdout": "", "stderr": "Operation not permitted",
+                }})
+                continue
             environment = dict(os.environ, **params.get("env", {}))
             launched = subprocess.run(params["command"], cwd=params["cwd"], env=environment,
                                       capture_output=True, text=True, timeout=10)
             result = {"exitCode": launched.returncode, "stdout": launched.stdout, "stderr": launched.stderr}
+        elif method == "command/exec/terminate":
+            process = commands.get(message["params"]["processId"])
+            if process is not None and process.poll() is None:
+                stop_command(process)
+            result = {}
         elif method == "turn/start":
             params = message["params"]
             assert resumed or not (root / "unloaded").exists()
@@ -131,7 +206,7 @@ def exchange(reader, writer):
             result = {"turn": {"id": "turn-" + output["task_id"], "status": "inProgress"}}
         else:
             raise AssertionError(method)
-        send(writer, {"id": message["id"], "result": result})
+        reply({"id": message["id"], "result": result})
 
 
 class Handler(socketserver.StreamRequestHandler):
