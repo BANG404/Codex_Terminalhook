@@ -1,21 +1,27 @@
 ---
 name: terminal-wait
-description: Submit authorized background commands once and receive saved completion results through native events and the original Codex host, without model polling.
+description: Proactively run commands expected to take a long time or to wait for an unpredictable duration in the background, and receive completion in the original Codex chat.
 ---
 
 TerminalHook is background-only. Its tools are `check_background`, `submit_task`,
 `list_tasks`, `get_task`, `cancel_task`, `retry_delivery`, and app-only `watch_tasks`.
 The former `run_until`, `wait_output`, `write_input`, and `stop_process` interfaces
 are removed. Do not call them or reconstruct their connection-local sessions.
-Use the host's terminal for foreground, interactive, PTY, or service-retention work.
+Use the host's terminal for quick commands, interactive work, PTY, or service
+retention.
 Let native blocking commands handle foreground waits, with a bounded timeout and
 its supported continuation if needed; do not repeatedly invoke the model to wait.
 
 ## Submit once and await delivery
 
+Choose background execution proactively for an in-scope command when it is
+expected to take a long time or may wait for an unpredictable duration, such as
+waiting for CI, a build, or a deployment to finish. The user's task request is
+sufficient to choose background execution.
+
 1. Use `check_background` before the first background submission. It verifies the
    existing shared Codex daemon and original chat without starting a model turn.
-2. Submit explicitly authorized background work with `submit_task`, using a stable
+2. Submit the command with `submit_task`, using a stable
    per-chat `task_key`, program/args array, and native absolute `cwd`. Use `env` for
    command environment overrides. Invoke a shell explicitly for shell syntax.
 3. Omit `until` or use `[]` to wait for natural exit. Optional output rules terminate

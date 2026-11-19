@@ -31,6 +31,8 @@ actual exit code, without a process handle or output cursor.
 
 The installer adds `mcp__terminalhook` to
 `[features.code_mode].direct_only_tool_namespaces`, preserving other settings.
+The installer sets `approval_mode = "approve"` for `submit_task` when the user
+has set no approval mode for the tool or the TerminalHook server.
 Manual installations need the same host configuration. Open a new chat after an
 upgrade to load the changed tool catalog. Current packages use native events and
 host callbacks without lifecycle hooks. The historical Stop-hook implementation
@@ -38,10 +40,10 @@ remains on [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree
 
 Example request to Codex:
 
-> Submit my build as one TerminalHook background task, then deliver its result to this chat when it completes.
+> Run the build and tell me when it finishes.
 
-For long background work, first call `check_background`, then `submit_task` with a stable `task_key`, program/args, and absolute `cwd`. Omit `timeout_ms` for no execution deadline; omit `until` for natural exit. The call returns immediately. End the turn and await completion delivery to the originating chat; do not poll the model. Background workers and their saved results survive MCP disconnection, but execution does not resume after a reboot. `list_tasks` opens the compact English MCP Apps dashboard in compatible hosts; `get_task`, `cancel_task`, and `retry_delivery` support inspection and recovery. A running shared Codex daemon, CLI proxy, and host-provided `threadId` metadata are required. Delivery failures preserve results; uncertain submissions are never blindly replayed. See the [full guide](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.md).
+Proactively use `submit_task` when an in-scope command is expected to take a long time or may wait for an unpredictable duration. The user's task request is sufficient to choose background execution. Call `check_background` before the first submission. Use a stable `task_key`, program/args, and absolute `cwd`. Omit `timeout_ms` for no execution deadline and `until` for natural exit. After receiving the task ID, end the turn and await delivery to the originating chat. Background workers and their saved results survive MCP disconnection, but execution does not resume after a reboot. In compatible hosts, the submission opens a task panel. Use `list_tasks` for chat-wide inspection and `get_task`, `cancel_task`, or `retry_delivery` for a specific task. A running shared Codex daemon, CLI proxy, and host-provided `threadId` metadata are required. Delivery failures preserve results. See the [full guide](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.md).
 
-For Windows Desktop hosts that normally use stdio, close Desktop and run `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` from this extracted package. The opt-in adapter gives Desktop and the worker one shared core without changing persistent settings or command permissions. Existing chats must be reopened in that session. See the full guide for source-build and isolated-test options. Normal Desktop startup restores the default transport.
+For Desktop hosts that normally use stdio, quit Desktop and run the shared-host launcher from this extracted package. Use `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` on Windows or `sh ./Start-DesktopSharedHost.sh` on macOS. The adapter gives Desktop and the worker one shared core without changing persistent settings or command permissions. Reopen the original chat in that session and run `check_background` before submitting. Normal Desktop startup restores the default transport.
 
 To uninstall, run `codex plugin remove terminalhook@terminalhook-local`, then optionally `codex plugin marketplace remove terminalhook-local`.
