@@ -2,11 +2,17 @@
 
 [English](background-tasks.md) | 简体中文
 
-已获授权的工作需要跨越单次工具调用或 MCP 断连时，使用 `submit_task`。
+用户请求范围内的命令预计耗时较长，或可能需要等待且完成时间难以预估时，主动调用 `submit_task`。
+用户的任务请求本身足以选择后台执行。
 独立的原生 worker 负责命令执行、输出或退出等待，先保存结果，再尝试向原聊天交付一次。
 等待过程不调用模型，不使用周期 Hook、Stop Hook、另一个 App Server 或 `codex exec`。
 
 ## 使用条件
+
+如果用户尚未为 `submit_task` 或其 TerminalHook 服务配置审批模式，安装器将该工具的
+Codex 审批模式设为 `approval_mode = "approve"`。该设置适用于 MCP 工具调用。
+宿主在启动 worker 或运行命令时仍按其命令权限处理。
+已有安装可重新运行安装器来应用该默认值。
 
 Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 App Server daemon。
 提交任务时，原聊天须已加载。worker 通过 `codex app-server proxy` 连接配置的 daemon。

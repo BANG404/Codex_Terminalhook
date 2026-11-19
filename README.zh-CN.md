@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、事件驱动任务面板，
-以及向原聊天交付完成结果。授权工作只提交一次，随后结束回合，任务完成后接收已保存结果。
+以及向原聊天交付完成结果。Codex 会主动将预计耗时较长或完成时间难以预估的任务提交一次，随后结束回合，任务完成后接收已保存结果。
 原生 worker 在本地等待，不轮询模型，可跨越 MCP 断连继续运行。
 
 原生测试和分发覆盖 Windows x64、Linux x64/ARM64、macOS Intel/Apple Silicon。
@@ -64,7 +64,7 @@ Linux/macOS 使用 `python3 scripts/package.py --channel development` 构建，�
 
 `package.ps1` 生成 ZIP 及 `dist/SHA256SUMS.txt`。本地安装需要保留目录，文件变化后重新执行安装器，不下载远端更新。两种模式均使用标准 `codex plugin marketplace add`、`codex plugin add` 命令及 Codex 配置编辑接口，保留已有设置，并将 `mcp__terminalhook` 加入 `features.code_mode.direct_only_tool_namespaces`。此管理过程不发起模型请求。
 
-也可以独立配置 MCP，参考 `examples/standalone.config.toml`。独立服务和插件二选一，避免重复工具。项目中 `.codex/config.toml` 的启用设置只对受信任项目生效，也不能替代安装。插件保留默认工具审批策略；MCP 命令使用本机账户权限，不继承 Codex 内置 shell 的逐命令沙箱。
+如果用户尚未为 `submit_task` 或其 TerminalHook 服务配置审批模式，安装器会为该工具设置 `approval_mode = "approve"`。`examples/standalone.config.toml` 的独立 MCP 示例包含同一设置。独立服务和插件二选一，避免重复工具。项目中 `.codex/config.toml` 的启用设置只对受信任项目生效，也不能替代安装。MCP 命令使用本机账户权限，不继承 Codex 内置 shell 的逐命令沙箱。
 
 卸载：
 
@@ -78,7 +78,7 @@ codex plugin marketplace remove terminalhook-local
 | 工具 | 行为 |
 | --- | --- |
 | `check_background` | 验证现有共享宿主及原聊天，不启动模型回合 |
-| `submit_task` | 使用稳定 `task_key` 启动一次已授权工作，立即返回持久任务 ID |
+| `submit_task` | 使用稳定的 `task_key` 提交预计耗时较长或完成时间难以预估的命令，立即返回任务 ID |
 | `list_tasks` | 明确查询原聊天的任务，不打开面板 |
 | `get_task` | 按需诊断已保存结果、执行状态和交付回执 |
 | `cancel_task` | 取消明确选择的后台任务，清理其进程树 |
@@ -90,12 +90,14 @@ codex plugin marketplace remove terminalhook-local
 更新后新开聊天，以便工具目录移除旧接口。TerminalHook 是插件名称；当前包使用原生事件与宿主回调，
 不注册 Stop 等生命周期 Hook。历史 Stop Hook 实现保存在 [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。
 
-先调用 `check_background`。后台提交需要可连接的共享 Codex daemon、CLI proxy 及宿主提供的
+用户请求范围内的命令预计耗时较长，或可能需要等待且完成时间难以预估时，主动调用 `submit_task`。
+用户的任务请求本身足以选择后台执行。首次提交前调用 `check_background`。
+后台提交需要可连接的共享 Codex daemon、CLI proxy 及宿主提供的
 `threadId` 元数据；预检不会猜测聊天 ID，也不会启动另一个 daemon。
 只有 stdio 且没有共享端点的宿主无法提交后台任务。Windows Desktop 的可选共享宿主启动器见
 [后台任务指南](docs/background-tasks.zh-CN.md)。
 
-随后提交已授权命令，例如：
+以下示例提交一条构建命令。
 
 ```json
 {

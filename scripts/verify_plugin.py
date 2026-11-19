@@ -55,16 +55,26 @@ def main():
                     else ["sh", str(extracted / "install.sh"), "--source", str(source)])
         install = subprocess.run(installer(extracted), cwd=extracted, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=90)
         assert install.returncode == 0, install.stdout + install.stderr
-        installed_config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        config_text = config_path.read_text(encoding="utf-8")
+        installed_config = tomllib.loads(config_text)
         assert installed_config["features"]["code_mode"]["direct_only_tool_namespaces"] == ["mcp__existing", "mcp__terminalhook"]
-        assert "# 保留原配置" in config_path.read_text(encoding="utf-8")
-        config_bytes = config_path.read_bytes()
+        server_policy = installed_config["plugins"]["terminalhook@terminalhook-local"]["mcp_servers"]["terminalhook"]
+        assert server_policy["tools"] == {"submit_task": {"approval_mode": "approve"}}, server_policy
+        assert "# 保留原配置" in config_text
         setup_command = (["pwsh", "-NoProfile", "-File", str(extracted / "Enable-DirectTools.ps1")] if os.name == "nt"
                          else [sys.executable, "-c", "from install import configure; configure()"])
-        setup = subprocess.run(setup_command, cwd=extracted,
-                               env=environment, capture_output=True, text=True, encoding="utf-8", timeout=60)
-        assert setup.returncode == 0, setup.stdout + setup.stderr
-        assert config_path.read_bytes() == config_bytes, "Repeated setup changed user config"
+        tool_approval = '.tools.submit_task]\napproval_mode = "approve"'
+        assert tool_approval in config_text
+        tool_override = config_text.replace(tool_approval, '.tools.submit_task]\napproval_mode = "prompt"')
+        server_override = config_text.replace(tool_approval, ']\ndefault_tools_approval_mode = "prompt"')
+        for text in (config_text, tool_override, server_override):
+            config_path.write_text(text, encoding="utf-8")
+            config_bytes = config_path.read_bytes()
+            setup = subprocess.run(setup_command, cwd=extracted, env=environment,
+                                   capture_output=True, text=True, encoding="utf-8", timeout=60)
+            assert setup.returncode == 0, setup.stdout + setup.stderr
+            assert config_path.read_bytes() == config_bytes, "Repeated setup changed user config"
+        config_path.write_text(config_text, encoding="utf-8")
         assert os.path.samefile(installed_config["marketplaces"]["terminalhook-local"]["source"], extracted)
         # If the new source is invalid, source migration must restore the old one.
         broken_source = Path(directory) / "broken replacement marketplace"
