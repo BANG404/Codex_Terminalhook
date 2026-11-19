@@ -656,21 +656,15 @@ async fn run_worker(path: &Path) -> Result<(), String> {
     control_task.abort();
     let result = match result {
         Ok(result) => result,
-        Err(error) => {
-            json!({"status":if cancellation.is_cancelled(){"cancelled"}else{"error"},"message":error})
-        }
+        Err(error) => json!({"status":"error","message":error}),
     };
     write_json(&path.join("result.json"), &result)?;
-    state["status"] = json!(if cancellation.is_cancelled() {
-        "cancelled"
-    } else if result["status"] == "timeout" {
-        "timed_out"
-    } else if result["status"] == "error"
-        || (result["status"] == "exited" && result["exit_code"] != 0)
-    {
-        "failed"
-    } else {
-        "completed"
+    state["status"] = json!(match result["status"].as_str() {
+        Some("cancelled") => "cancelled",
+        Some("timeout") => "timed_out",
+        Some("error") => "failed",
+        Some("exited") if result["exit_code"] != 0 => "failed",
+        _ => "completed",
     });
     state["finished_at_ms"] = json!(now_ms());
     write_json(&path.join("state.json"), &state)?;

@@ -178,8 +178,14 @@ Execution and delivery are separate states. `completed` does not mean delivered;
 inspect `delivery` and the actual exit code. Natural results have `status: "exited"`;
 nonzero exits mark the task `failed`. Results contain no connection-local process
 ID or output cursor; task operations use the durable `task_id`.
-deadlines are `timed_out`. Output-condition completion reports `matched` with
+Deadlines are `timed_out`. Output-condition completion reports `matched` with
 the actual exit code after cleanup, which can reflect deliberate termination.
+
+`cancellation_requested` acknowledges the request. On macOS, the worker uses
+the command's exit report from the host to confirm termination, including when
+the command exits while the termination request is in flight. If cleanup
+cannot confirm that the command stopped, the task is `failed`, the result
+includes the diagnostic, and `process_running` is `null` for unknown.
 
 The result is saved before `turn/start` is called with standalone `toolOutput`.
 If the original chat is active, Codex queues the result for that turn; otherwise
