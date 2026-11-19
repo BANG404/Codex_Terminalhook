@@ -35,7 +35,7 @@ impl TerminalHook {
             ),
             Tool::new(
                 "cancel_task",
-                "Cancel an explicitly selected background task owned by the calling chat. Terminates its managed process tree; completion delivery reports cancellation.",
+                "Request cancellation of an explicitly selected background task owned by the calling chat. Completion delivery reports whether its managed process tree was stopped.",
                 schemars::schema_for!(TaskRequest)
                     .as_object()
                     .unwrap()

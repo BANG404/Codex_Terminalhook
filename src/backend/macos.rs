@@ -6,8 +6,10 @@ use crate::{
 };
 use data_encoding::BASE64;
 use serde_json::{Value, json};
-use std::collections::VecDeque;
-use tokio::time::timeout;
+use std::{collections::VecDeque, time::Duration};
+use tokio::time::{Instant, timeout_at};
+
+const TERMINATE_REJECTION_GRACE: Duration = Duration::from_secs(1);
 
 pub struct Backend {
     bridge: Bridge,
@@ -107,27 +109,46 @@ impl Backend {
         })
     }
 
+    async fn terminate(&mut self) -> Result<(), String> {
+        let mut deadline = Instant::now() + RPC_TIMEOUT;
+        let mut diagnostic = "Codex did not confirm the command stopped".to_string();
+        let terminate_id = timeout_at(
+            deadline,
+            self.bridge.request(
+                "command/exec/terminate",
+                json!({"processId": self.process_id}),
+            ),
+        )
+        .await
+        .map_err(|_| diagnostic.clone())?
+        .map_err(|error| format!("{diagnostic}: {error}"))?;
+        loop {
+            let message = timeout_at(deadline, self.bridge.receive())
+                .await
+                .map_err(|_| diagnostic.clone())?
+                .map_err(|error| format!("{diagnostic}: {error}"))?;
+            let id = message["id"].as_u64();
+            if id == Some(self.request_id) {
+                return self.completed(&message);
+            }
+            // Acknowledging termination only confirms receipt. A rejection can
+            // race a natural exit whose command result is still in transit.
+            if id == Some(terminate_id)
+                && let Some(error) = message.get("error")
+            {
+                diagnostic = format!(
+                    "Codex command/exec/terminate rejected: {error}; command exit unconfirmed"
+                );
+                deadline = deadline.min(Instant::now() + TERMINATE_REJECTION_GRACE);
+            }
+        }
+    }
+
     pub async fn finish(mut self) -> Result<Option<i32>, String> {
         let cleanup = if self.finished {
             Ok(())
         } else {
-            timeout(RPC_TIMEOUT, async {
-                self.bridge
-                    .request(
-                        "command/exec/terminate",
-                        json!({"processId": self.process_id}),
-                    )
-                    .await?;
-                // The original command result also resolves a race with natural exit.
-                loop {
-                    let message = self.bridge.receive().await?;
-                    if message["id"].as_u64() == Some(self.request_id) {
-                        break self.completed(&message);
-                    }
-                }
-            })
-            .await
-            .unwrap_or_else(|_| Err("Codex did not confirm the command stopped".into()))
+            self.terminate().await
         };
         self.bridge.close().await;
         cleanup?;
