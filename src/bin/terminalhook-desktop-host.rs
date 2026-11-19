@@ -185,32 +185,52 @@ fn create_private_directory(directory: &Path) -> Result<(), String> {
 async fn clear_stale_socket(path: &Path) -> Result<(), String> {
     use std::{io::ErrorKind, os::unix::fs::FileTypeExt};
 
-    match std::fs::symlink_metadata(path) {
+    let entry = match std::fs::symlink_metadata(path) {
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(format!("Cannot inspect Desktop socket: {error}")),
-        Ok(metadata) if !metadata.file_type().is_socket() => {
+        Ok(metadata) => metadata,
+    };
+    // Codex on macOS can publish the requested path as an alias to its socket.
+    let target = if entry.file_type().is_symlink() {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Some(metadata),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("Cannot inspect Desktop socket target: {error}")),
+        }
+    } else {
+        Some(entry)
+    };
+    if let Some(metadata) = target {
+        if !metadata.file_type().is_socket() {
             return Err(format!(
                 "Desktop socket path is occupied: {}",
                 path.display()
             ));
         }
-        Ok(_) => {}
-    }
-    match timeout(
-        Duration::from_secs(1),
-        tokio::net::UnixStream::connect(path),
-    )
-    .await
-    {
-        Ok(Err(error)) if error.kind() == ErrorKind::ConnectionRefused => {
-            std::fs::remove_file(path)
-                .map_err(|error| format!("Cannot remove stale Desktop socket: {error}"))
+        match timeout(
+            Duration::from_secs(1),
+            tokio::net::UnixStream::connect(path),
+        )
+        .await
+        {
+            Ok(Err(error))
+                if matches!(
+                    error.kind(),
+                    ErrorKind::ConnectionRefused | ErrorKind::NotFound
+                ) => {}
+            _ => {
+                return Err(format!(
+                    "Desktop socket is in use or inaccessible: {}",
+                    path.display()
+                ));
+            }
         }
-        Ok(Err(error)) if error.kind() == ErrorKind::NotFound => Ok(()),
-        _ => Err(format!(
-            "Desktop socket is in use or inaccessible: {}",
-            path.display()
-        )),
+    }
+    // Unlink the configured path only. The native CLI owns the target of any alias.
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Cannot remove stale Desktop socket: {error}")),
     }
 }
 

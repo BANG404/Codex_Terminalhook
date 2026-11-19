@@ -139,10 +139,20 @@ class UnixDesktopHostTests(unittest.TestCase):
         self.assertEqual(self.socket.parent.stat().st_mode & 0o777, 0o755)
 
     def test_preserves_a_live_socket_and_recovers_a_stale_socket(self):
+        self.check_socket_lifecycle(self.socket)
+
+    def test_preserves_a_live_socket_alias_and_unlinks_only_the_stale_alias(self):
+        native_socket = self.socket.parent.parent / "native.sock"
         self.socket.parent.mkdir(mode=0o700)
+        self.socket.symlink_to(native_socket)
+        self.check_socket_lifecycle(native_socket)
+        self.assertTrue(native_socket.is_socket())
+
+    def check_socket_lifecycle(self, endpoint):
+        self.socket.parent.mkdir(mode=0o700, exist_ok=True)
         write_shell_command(self.cli, 'printf "%s\\n" STARTED_FAKE_CORE >&2; exit 3')
         with socket.socket(socket.AF_UNIX) as listener:
-            listener.bind(str(self.socket))
+            listener.bind(str(endpoint))
             listener.listen()
             result = self.start_once()
             self.assertNotEqual(result.returncode, 0, result)
@@ -152,6 +162,22 @@ class UnixDesktopHostTests(unittest.TestCase):
         restarted = self.start_once()
         self.assertIn("STARTED_FAKE_CORE", restarted.stderr)
         self.assertFalse(self.socket.exists())
+
+    def test_unlinks_a_dangling_socket_alias_but_preserves_other_entries(self):
+        self.socket.parent.mkdir(mode=0o700)
+        self.socket.symlink_to(self.socket.parent / "native.sock")
+        write_shell_command(self.cli, 'printf "%s\\n" STARTED_FAKE_CORE >&2; exit 3')
+        result = self.start_once()
+        self.assertIn("STARTED_FAKE_CORE", result.stderr)
+        self.assertFalse(self.socket.is_symlink())
+
+        target = self.socket.parent / "unrelated"
+        target.write_text("untouched", encoding="utf-8")
+        self.socket.symlink_to(target)
+        result = self.start_once()
+        self.assertIn("socket path is occupied", result.stderr)
+        self.assertTrue(self.socket.is_symlink())
+        self.assertEqual(target.read_text(encoding="utf-8"), "untouched")
 
     def test_termination_during_startup_cleans_up_native_core(self):
         write_shell_command(self.cli, """
