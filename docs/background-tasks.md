@@ -55,6 +55,10 @@ is launched when preflight fails. Select an already running shared host that
 owns the original chat, or use the host terminal. Simulated socket
 tests do not prove native desktop callback support.
 
+On macOS, Desktop 26.1111.71704 (bundled CLI 0.169.1) also ran the original
+chat over stdio. The default control socket was absent. The bundled proxy
+exited with `No such file or directory` before the WebSocket handshake.
+
 ### Opt-in Windows Desktop shared host
 
 The package includes `terminalhook-desktop-host.exe` and
@@ -92,6 +96,30 @@ that policy. Desktop versions with incompatible CLI protocols fail visibly.
 On Windows, an OS-owned process job removes the core, proxy, and delegated CLI
 descendants even if Desktop forcibly terminates the adapter. Explicit worker
 breakaway remains permitted; closing the UI does not cancel a detached task.
+
+### Opt-in macOS Desktop shared host
+
+Quit Codex Desktop and run the launcher from the extracted macOS package:
+
+```sh
+sh ./Start-DesktopSharedHost.sh
+```
+
+The launcher defaults to `/Applications/ChatGPT.app`. Use `--desktop-app` for a
+different installation. From a source checkout, build the adapter and run
+`sh scripts/Start-DesktopSharedHost.sh --host-adapter target/debug/terminalhook-desktop-host`.
+The launcher uses the selected app's bundled CLI and passes the override through Launch
+Services for this launch only. It leaves a running app untouched.
+
+The adapter gives Desktop and TerminalHook one shared core, as on Windows.
+Reopen the original chat in this Desktop session and call `check_background` to
+verify it before submitting work. A normal Desktop launch restores the default
+transport. To use a custom `CODEX_HOME`, set it for the launcher. If that home
+makes the Unix socket path too long, set `TERMINALHOOK_DESKTOP_SOCKET` to a
+shorter absolute path inside a dedicated private directory. The adapter creates
+missing directories with owner-only permissions and rejects an occupied
+endpoint. A normal shutdown or termination signal stops the adapter's core
+and proxy. After a force kill, a live endpoint still blocks a second launch.
 
 ## Submit once, then wait for delivery
 
