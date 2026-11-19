@@ -72,10 +72,18 @@ def configure(read_marketplace=False):
         existing = layer["config"].get("features", {}).get("code_mode", {}).get("direct_only_tool_namespaces", [])
         if not isinstance(existing, list):
             raise ValueError("Existing direct-only namespaces must be an array")
+        edits = []
         if "mcp__terminalhook" not in existing:
-            request(3, "config/batchWrite", {"filePath": layer["name"]["file"], "expectedVersion": layer["version"],
-                    "edits": [{"keyPath": "features.code_mode.direct_only_tool_namespaces",
-                               "value": [*existing, "mcp__terminalhook"], "mergeStrategy": "replace"}]})
+            edits.append({"keyPath": "features.code_mode.direct_only_tool_namespaces",
+                          "value": [*existing, "mcp__terminalhook"], "mergeStrategy": "replace"})
+        server_policy = layer["config"].get("plugins", {}).get(PLUGIN, {}).get("mcp_servers", {}).get("terminalhook", {})
+        submit_policy = server_policy.get("tools", {}).get("submit_task", {})
+        if submit_policy.get("approval_mode") is None and server_policy.get("default_tools_approval_mode") is None:
+            edits.append({"keyPath": f"plugins.{PLUGIN}.mcp_servers.terminalhook.tools.submit_task.approval_mode",
+                          "value": "approve", "mergeStrategy": "replace"})
+        if edits:
+            request(3, "config/batchWrite", {"filePath": layer["name"]["file"],
+                                             "expectedVersion": layer["version"], "edits": edits})
     finally:
         server.stdin.close()
         try:
