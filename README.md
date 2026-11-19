@@ -7,8 +7,9 @@ English | [简体中文](README.zh-CN.md)
 
 TerminalHook is a Rust MCP server and Codex plugin for durable background commands,
 event-driven task dashboards, and completion delivery to the originating chat.
-Submit authorized work once, end the turn, and receive its saved result when it
-finishes. Native workers wait without model polling and survive MCP disconnection.
+Codex submits long or unpredictably timed work once, ends the turn, and receives
+the saved result when it finishes. Native workers wait without model polling and
+survive MCP disconnection.
 
 Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS
 Intel/Apple Silicon. Commands use separate stdout/stderr pipes and closed stdin.
@@ -70,7 +71,7 @@ On Linux/macOS, build with `python3 scripts/package.py --channel development`, t
 
 `package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. Local installations require the directory to stay available and the installer to be rerun after local changes; they do not download remote updates. In both modes, the installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands and Codex's configuration editing interface to preserve existing settings and add `mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces`. This administration does not send model requests.
 
-Alternatively, configure a standalone MCP server using `examples/standalone.config.toml`. Choose either standalone MCP or the plugin to avoid duplicate tools. Enablement in a project's `.codex/config.toml` only applies to trusted projects and does not replace installation. The plugin retains the default tool approval policy. MCP commands use the local account's OS permissions and do not inherit the per-command sandbox of Codex's built-in shell.
+The installer sets `approval_mode = "approve"` for `submit_task` when the user has not configured an approval mode for that tool or its TerminalHook server. The standalone example in `examples/standalone.config.toml` includes the same tool setting. Choose either standalone MCP or the plugin to avoid duplicate tools. Enablement in a project's `.codex/config.toml` only applies to trusted projects and does not replace installation. MCP commands use the local account's OS permissions and do not inherit the per-command sandbox of Codex's built-in shell.
 
 To uninstall:
 
@@ -84,7 +85,7 @@ codex plugin marketplace remove terminalhook-local
 | Tool | Behavior |
 | --- | --- |
 | `check_background` | Verify the existing shared host and originating chat without starting a model turn |
-| `submit_task` | Launch authorized work once under a stable `task_key`; return a durable task ID immediately |
+| `submit_task` | Start a long or unpredictably timed command under a stable `task_key` and immediately return its task ID |
 | `list_tasks` | Explicitly inspect the originating chat's tasks without opening a panel |
 | `get_task` | Inspect a saved result, execution state and delivery receipt for diagnosis |
 | `cancel_task` | Cancel an explicitly selected background task and clean up its process tree |
@@ -99,13 +100,16 @@ The name TerminalHook refers to the plugin; current packages use native events
 and host callbacks and do not register Stop or other lifecycle hooks. The historical
 Stop-hook implementation remains on [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook).
 
-First call `check_background`. A reachable shared Codex daemon, CLI proxy and
+When an in-scope command is expected to take a long time or may wait for an
+unpredictable duration, use `submit_task` proactively. The user's task request
+is sufficient to choose background execution. Before the first submission,
+call `check_background`. A reachable shared Codex daemon, CLI proxy and
 host-provided `threadId` metadata are required; TerminalHook never guesses a chat
 ID or starts another daemon during preflight. A stdio-only host with no shared
 endpoint cannot submit background work. Windows Desktop has an optional shared
 host launcher described in the [background guide](docs/background-tasks.md).
 
-Then submit the authorized command, for example:
+The following example submits a build.
 
 ```json
 {
