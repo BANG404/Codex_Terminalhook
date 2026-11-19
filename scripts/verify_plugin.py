@@ -96,6 +96,9 @@ def main():
         environment.pop("TERMINALHOOK_LONG_WAIT", None)
         result = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
                                 cwd=ROOT, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=120)
+        (artifacts / "installed-plugin-protocol-tests.log").write_text(
+            result.stdout + result.stderr, encoding="utf-8"
+        )
         assert result.returncode == 0, result.stdout + result.stderr
         summary = {"passed": True, "version":expected_version, "archive_members": sorted(members), "install": install.stdout,
                    "resolved_mcp": server, "cached_binary_tests": result.stderr}
