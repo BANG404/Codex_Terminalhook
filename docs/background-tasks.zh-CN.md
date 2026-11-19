@@ -41,6 +41,10 @@ App Server（CLI 0.169.0-alpha.11.1），默认共享 socket 返回 Windows 错�
 需要选择已经运行且拥有原聊天的共享宿主，或使用宿主终端。
 模拟 socket 测试不能证明原生桌面回调能力。
 
+macOS 上的 Desktop 26.1111.71704（内置 CLI 0.169.1）也通过 stdio 运行原聊天。
+默认控制 socket 不存在，内置代理在 WebSocket 握手前以
+`No such file or directory` 退出。
+
 ### 可选的 Windows 桌面共享宿主
 
 安装包包含 `terminalhook-desktop-host.exe` 和 `Start-DesktopSharedHost.ps1`。
@@ -71,6 +75,27 @@ Windows socket ACL 由 Codex 自行创建，适配器不放宽权限。
 桌面版本的 CLI 协议不兼容时会明确失败。
 Windows 使用由操作系统管理的进程 Job；桌面强制终止适配器时，也会清理其核心、代理及
 转发 CLI 的子进程。仍允许 worker 显式脱离；关闭界面不会取消独立后台任务。
+
+### 可选的 macOS 桌面共享宿主
+
+退出 Codex Desktop 后，在解压的 macOS 安装包中运行：
+
+```sh
+sh ./Start-DesktopSharedHost.sh
+```
+
+启动器默认使用 `/Applications/ChatGPT.app`。安装在其他位置时可用
+`--desktop-app` 指定。源码构建可运行
+`sh scripts/Start-DesktopSharedHost.sh --host-adapter target/debug/terminalhook-desktop-host`。
+启动器使用所选桌面的内置 CLI，通过 Launch Services 将适配器覆盖项传给本次启动。
+它会保留已运行的桌面进程。
+
+与 Windows 一样，适配器让桌面和 TerminalHook 共用一个核心。请在该桌面会话中重新打开原聊天，
+提交任务前调用 `check_background` 确认。正常打开桌面应用即可恢复默认传输。
+如需使用自定义 `CODEX_HOME`，可在启动时传给脚本。如果这导致 Unix socket 路径过长，
+请用 `TERMINALHOOK_DESKTOP_SOCKET` 指向专用私有目录中的较短绝对路径。
+适配器为缺失目录设置仅所有者可访问的权限，并拒绝使用被占用的端点。
+正常退出或收到终止信号时会关闭核心和代理。强制杀死适配器后，仍在监听的端点会阻止再次启动。
 
 ## 提交一次，等待结果交付
 
