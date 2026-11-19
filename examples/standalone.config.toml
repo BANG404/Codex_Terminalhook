@@ -6,3 +6,6 @@ command = 'D:\Projects\Codex_Terminalhook\target\release\terminalhook.exe'
 startup_timeout_sec = 10
 tool_timeout_sec = 660
 env_vars = ["CODEX_HOME", "CODEX_APP_RUNTIME_CLI_PATH", "TERMINALHOOK_CODEX_BIN", "TERMINALHOOK_CODEX_SOCKET"]
+
+[mcp_servers.terminalhook.tools.submit_task]
+approval_mode = "approve"

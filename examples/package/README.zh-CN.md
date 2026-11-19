@@ -27,16 +27,17 @@ Git 安装需要已安装 Codex CLI 和 Git。Windows 使用 `marketplace` 或 `
 前台及交互工作使用宿主终端。后台命令 stdin 关闭，输出使用独立 stdout/stderr 管道。
 自然退出结果包含 `status: "exited"` 和真实退出码，不再返回进程句柄及输出游标。
 
-安装器将 `mcp__terminalhook` 加入 `[features.code_mode].direct_only_tool_namespaces`，
-并保留其他设置；手动安装也需配置宿主。升级后新开聊天加载新的工具目录。
+安装器将 `mcp__terminalhook` 加入 `[features.code_mode].direct_only_tool_namespaces`，并保留其他设置。
+如果用户尚未为 `submit_task` 或其 TerminalHook 服务配置审批模式，安装器会将该工具的审批模式设为 `approval_mode = "approve"`。
+手动安装也需配置宿主。升级后新开聊天加载新的工具目录。
 当前包使用原生事件与宿主回调，不注册生命周期 Hook。历史 Stop Hook 实现保存在
 [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。
 
 请求示例：
 
-> 使用 TerminalHook 将构建提交为一次后台任务，完成后把结果交付到本聊天。
+> 运行构建，完成后告诉我结果。
 
-长时间后台工作先用 `check_background` 检查宿主，再用稳定的 `task_key`、程序/参数及绝对 `cwd` 调用 `submit_task`。省略 `timeout_ms` 表示无执行期限，省略 `until` 表示自然退出；调用立即返回，随后结束回合等待原聊天收到结果，不要轮询模型。后台 worker 及已保存结果可跨越 MCP 断连，但重启后不会恢复命令执行。兼容宿主中，`list_tasks` 打开紧凑的英语 MCP Apps 面板；`get_task`、`cancel_task`、`retry_delivery` 支持查看、取消和恢复。后台模式需要运行中的共享 Codex daemon、CLI proxy 及宿主提供的 `threadId` 元数据。交付失败保留结果，投递结果未知时不盲目重发。详见[完整指南](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.zh-CN.md)。
+用户请求范围内的命令预计耗时较长，或可能需要等待且完成时间难以预估时，主动调用 `submit_task`。用户的任务请求本身足以选择后台执行。首次提交前调用 `check_background`。提交时使用稳定的 `task_key`、程序及参数和绝对 `cwd`。省略 `timeout_ms` 表示无执行期限，省略 `until` 表示等待自然退出。拿到任务 ID 后结束回合，等待结果投递到原聊天。后台 worker 和已保存结果可跨越 MCP 断连，但重启后不会恢复命令执行。在兼容宿主中，提交会打开任务面板。用 `list_tasks` 查看当前聊天的任务，用 `get_task`、`cancel_task` 或 `retry_delivery` 操作单个任务。后台模式需要运行中的共享 Codex daemon、CLI proxy 及宿主提供的 `threadId` 元数据。交付失败时会保留结果。详见[完整指南](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.zh-CN.md)。
 
 对于默认使用 stdio 的桌面宿主，请退出桌面，再从本解压目录运行共享宿主启动器。Windows 使用 `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1`，macOS 使用 `sh ./Start-DesktopSharedHost.sh`。适配器让桌面和 worker 共用一个核心，无需更改持久设置或命令权限。在该桌面会话中重新打开原聊天，并在提交任务前运行 `check_background`。正常启动桌面即可恢复默认传输。
 

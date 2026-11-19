@@ -7,7 +7,7 @@
   "interface": {
     "displayName": "TerminalHook",
     "shortDescription": "Run background tasks with native event delivery",
-    "longDescription": "Submit authorized background work once, receive saved results in the original chat, and inspect the event-driven task dashboard. Independent workers survive MCP disconnection. No synchronous process tools or lifecycle hooks.",
+    "longDescription": "Run long commands and waits of unpredictable duration in the background, receive saved results in the original chat, and inspect the event-driven task dashboard. Independent workers survive MCP disconnection.",
     "category": "Developer Tools"
   }
 }
