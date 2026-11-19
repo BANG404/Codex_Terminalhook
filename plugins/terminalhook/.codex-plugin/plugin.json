@@ -1,13 +1,13 @@
 {
   "name": "terminalhook",
-  "version": "0.6.2-beta.111.g8d834f6bc0f7",
+  "version": "0.7.0-beta.123.gd8f36402109d",
   "description": "Durable background commands and event-driven completion delivery to the originating Codex chat.",
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
     "displayName": "TerminalHook",
     "shortDescription": "Run background tasks with native event delivery",
-    "longDescription": "Submit authorized background work once, receive saved results in the original chat, and inspect the event-driven task dashboard. Independent workers survive MCP disconnection. No synchronous process tools or lifecycle hooks.",
+    "longDescription": "Run long commands and waits of unpredictable duration in the background, receive saved results in the original chat, and inspect the event-driven task dashboard. Independent workers survive MCP disconnection.",
     "category": "Developer Tools"
   }
 }
