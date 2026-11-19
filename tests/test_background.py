@@ -97,7 +97,12 @@ class BackgroundTests(unittest.TestCase):
             if predicate(state):
                 return state
             time.sleep(0.03)
-        self.fail(f"task did not settle: {self.state(job)}")
+        diagnostics = []
+        for path in (self.root / "tasks" / job["task_id"] / "worker.log",
+                     self.root / "command-events.jsonl"):
+            if path.is_file():
+                diagnostics.append(f"{path.name}: {path.read_text(encoding='utf-8', errors='replace')[-4096:]}")
+        self.fail(f"task did not settle: {self.state(job)}\n" + "\n".join(diagnostics))
 
     def deliveries(self):
         path = self.root / "deliveries.jsonl"
@@ -477,21 +482,56 @@ class BackgroundTests(unittest.TestCase):
         job = self.submit("import sys; sys.stdout.write('x'*70000); print('READY',file=sys.stderr)",
                           streams=["stderr"], until=[{"name": "ready", "pattern": "READY"}])
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
-        self.assertEqual(state["result"]["status"], "matched")
+        self.assertEqual(state["result"]["status"], "matched", state["result"])
 
     def test_cancellation_cleans_command_descendants_before_delivery(self):
         marker = self.root / "cancel-child"
         code = f"import subprocess,sys,time; from pathlib import Path; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']); Path({str(marker)!r}).write_text(str(p.pid)); time.sleep(120)"
         job = self.submit(code)
-        self.await_state(job, lambda s: marker.exists())
-        self.call("cancel_task", {"task_id": job["task_id"]})
+        self.await_state(job, lambda s: marker.exists() and marker.read_text().isdigit())
+        receipt = self.call("cancel_task", {"task_id": job["task_id"]})
+        self.assertEqual(receipt["status"], "cancellation_requested", receipt)
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
-        self.assertEqual(state["status"], "cancelled")
+        self.assertEqual(state["status"], "cancelled", state)
         self.assertTrue(wait_for_exit(int(marker.read_text()), timeout=5))
         if sys.platform == "darwin":
             self.assertIsNone(state["result"]["os_pid"])
         else:
             self.assertTrue(wait_for_exit(state["result"]["os_pid"], timeout=5))
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS host command backend")
+    def test_cancel_reports_terminate_rejection_when_exit_is_unconfirmed(self):
+        (self.root / "reject-terminate").touch()
+        marker = self.root / "ready"
+        job = self.submit(f"import time; from pathlib import Path; Path({str(marker)!r}).touch(); time.sleep(120)")
+        self.await_state(job, lambda s: marker.exists())
+        receipt = self.call("cancel_task", {"task_id": job["task_id"]})
+        self.assertEqual(receipt["status"], "cancellation_requested", receipt)
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "failed", state)
+        self.assertEqual(state["result"]["status"], "error")
+        self.assertIsNone(state["result"]["process_running"])
+        self.assertIn("simulated terminate rejection", state["result"]["message"])
+        self.assertIn("command exit unconfirmed", state["result"]["message"])
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS host command backend")
+    def test_cancel_uses_exit_report_when_terminate_rejection_races_natural_exit(self):
+        (self.root / "reject-terminate").touch()
+        marker = self.root / "ready"
+        rejected = self.root / "terminate-rejected"
+        job = self.submit(
+            "import time\nfrom pathlib import Path\n"
+            f"Path({str(marker)!r}).touch()\n"
+            f"while not Path({str(rejected)!r}).exists():\n    time.sleep(.01)\n"
+        )
+        self.await_state(job, lambda s: marker.exists())
+        receipt = self.call("cancel_task", {"task_id": job["task_id"]})
+        self.assertEqual(receipt["status"], "cancellation_requested", receipt)
+        state = self.await_state(job, lambda s: s["delivery"] == "delivered")
+        self.assertEqual(state["status"], "cancelled", state)
+        self.assertEqual(state["result"]["status"], "cancelled")
+        self.assertIs(state["result"]["process_running"], False)
+        self.assertEqual(state["result"]["exit_code"], 0)
 
     @unittest.skipUnless(os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "set TERMINALHOOK_LONG_WAIT=1")
     def test_background_long_wait_survives_disconnect(self):

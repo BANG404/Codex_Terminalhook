@@ -85,7 +85,12 @@ def stop_command(process):
         pass
 
 
-def stream_command(request, reply):
+def record_command_event(root, event, request_id, **details):
+    with (root / "command-events.jsonl").open("a", encoding="utf-8") as log:
+        log.write(json.dumps({"event": event, "id": request_id, **details}) + "\n")
+
+
+def stream_command(request, reply, root):
     params = request["params"]
     assert "sandboxPolicy" not in params and "permissionProfile" not in params
     assert params["disableTimeout"] and params["disableOutputCap"]
@@ -113,10 +118,12 @@ def stream_command(request, reply):
         for reader in readers:
             reader.start()
         code = process.wait()
+        record_command_event(root, "process_exited", request["id"], exit_code=code)
         stop_command(process)
         for reader in readers:
             reader.join()
         reply({"id": request["id"], "result": {"exitCode": code, "stdout": "", "stderr": ""}})
+        record_command_event(root, "exit_sent", request["id"])
 
     threading.Thread(target=finish, daemon=True).start()
     return process
@@ -176,7 +183,7 @@ def handle_requests(reader, reply, root, owner, commands):
         elif method == "command/exec":
             params = message["params"]
             if params.get("streamStdoutStderr"):
-                commands[params["processId"]] = stream_command(message, reply)
+                commands[params["processId"]] = stream_command(message, reply, root)
                 continue
             if sys.platform == "darwin":
                 # A sandboxed launcher cannot create the coordinator's worker log.
@@ -189,10 +196,19 @@ def handle_requests(reader, reply, root, owner, commands):
                                       capture_output=True, text=True, timeout=10)
             result = {"exitCode": launched.returncode, "stdout": launched.stdout, "stderr": launched.stderr}
         elif method == "command/exec/terminate":
+            record_command_event(root, "terminate_requested", message["id"])
+            if (root / "reject-terminate").exists():
+                error = {"code": -32603, "message": "simulated terminate rejection"}
+                reply({"id": message["id"], "error": error})
+                record_command_event(root, "terminate_rejected", message["id"], error=error)
+                (root / "terminate-rejected").touch()
+                continue
             process = commands.get(message["params"]["processId"])
             if process is not None and process.poll() is None:
                 stop_command(process)
-            result = {}
+            reply({"id": message["id"], "result": {}})
+            record_command_event(root, "terminate_acknowledged", message["id"])
+            continue
         elif method == "turn/start":
             params = message["params"]
             assert resumed or not (root / "unloaded").exists()

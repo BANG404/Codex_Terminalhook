@@ -74,18 +74,26 @@ pub async fn execute(
         }
     };
     let pid = backend.pid();
-    match backend.finish().await {
-        Ok(code) => exit_code = code,
-        Err(e) => {
-            error.get_or_insert(e);
+    let process_running = match backend.finish().await {
+        Ok(code) => {
+            exit_code = code;
+            Some(false)
         }
-    }
+        Err(e) => {
+            if let Some(previous) = error.as_mut() {
+                previous.push_str(&format!("; cleanup: {e}"));
+            } else {
+                error = Some(e);
+            }
+            None
+        }
+    };
     if let Err(e) = logs.flush().await {
         error.get_or_insert(e);
     }
     let mut result = json!({
         "status": if error.is_some() { "error" } else { status },
-        "os_pid": pid, "process_running": false, "exit_code": exit_code,
+        "os_pid": pid, "process_running": process_running, "exit_code": exit_code,
         "elapsed_ms": started.elapsed().as_millis() as u64, "bytes_seen": bytes,
         "output_tail": {"stdout": tails[0], "stderr": tails[1]},
         "log_dir": logs.directory, "logs_rotated": logs.rotated,
