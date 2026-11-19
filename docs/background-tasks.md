@@ -2,13 +2,20 @@
 
 English | [简体中文](background-tasks.zh-CN.md)
 
-Use `submit_task` when explicitly authorized work must continue beyond a tool
-call or MCP disconnection. A detached native worker owns the command, waits for
-output or exit, and saves its result before attempting one delivery to the
-originating Codex chat. Waiting does not invoke a model. This does not use a
-periodic hook, Stop hook, a second app server, or `codex exec`.
+Proactively use `submit_task` for a command within the user's task when it is
+expected to take a long time or may wait for an unpredictable duration. The
+user's task request is sufficient to choose background execution. A detached
+native worker owns the command, waits for output or exit, and saves its result
+before attempting one delivery to the originating Codex chat. Waiting takes
+place entirely in the worker. Delivery uses the existing Codex daemon.
 
 ## Requirements
+
+The installer sets Codex's per-tool `approval_mode = "approve"` for `submit_task`
+when the user's configuration specifies neither a tool-level nor a TerminalHook
+server-level approval mode. This setting applies to the MCP tool call. The host
+applies its command permissions when it launches a worker or runs a command.
+For an existing installation, rerun the installer to apply the approval default.
 
 The Codex host must supply `threadId` in MCP request metadata and have a running
 shared app-server daemon with the original chat loaded at submission. The worker

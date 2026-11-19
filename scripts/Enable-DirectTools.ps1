@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param([string]$CodexPath = 'codex', [string]$ReadMarketplace)
 $ErrorActionPreference = 'Stop'
+$pluginId = 'terminalhook@terminalhook-local'
 
 # Use Codex's TOML editor and version lease rather than rewriting user settings.
 # This starts only an administrative app-server; it creates no model turn.
@@ -72,17 +73,23 @@ try {
     }
     $existing = $userLayer.config.features.code_mode.direct_only_tool_namespaces
     if ($null -ne $existing -and $existing -isnot [array]) { throw 'Existing direct-only namespaces must be an array' }
-    $namespaces = @($existing)
-    $namespaces = @($namespaces | Where-Object { $null -ne $_ })
-    if ('mcp__terminalhook' -cnotin $namespaces) { $namespaces += 'mcp__terminalhook' }
+    $edits = @()
     if ('mcp__terminalhook' -cnotin @($existing)) {
+        $namespaces = @($existing | Where-Object { $null -ne $_ }) + 'mcp__terminalhook'
+        $edits += @{keyPath='features.code_mode.direct_only_tool_namespaces'; value=$namespaces; mergeStrategy='replace'}
+    }
+    $serverPolicy = $userLayer.config.plugins.$pluginId.mcp_servers.terminalhook
+    if ($null -eq $serverPolicy.tools.submit_task.approval_mode -and $null -eq $serverPolicy.default_tools_approval_mode) {
+        $edits += @{keyPath="plugins.$pluginId.mcp_servers.terminalhook.tools.submit_task.approval_mode"; value='approve'; mergeStrategy='replace'}
+    }
+    if ($edits.Count -gt 0) {
         $null = Invoke-ConfigRequest 3 'config/batchWrite' @{
             filePath=$userLayer.name.file
             expectedVersion=$userLayer.version
-            edits=@(@{keyPath='features.code_mode.direct_only_tool_namespaces'; value=$namespaces; mergeStrategy='replace'})
+            edits=$edits
         }
     }
-    Write-Output 'TerminalHook direct calls enabled in user config; other namespaces preserved.'
+    Write-Output 'TerminalHook direct calls and submission approval defaults configured.'
 } finally {
     if ($server.Id -and -not $server.HasExited) {
         $server.StandardInput.Close()
