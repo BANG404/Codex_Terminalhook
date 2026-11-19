@@ -44,19 +44,16 @@ pub async fn execute(
             biased;
             _ = cancellation.cancelled() => break "cancelled",
             _ = &mut deadline => break "timeout",
-            result = backend.process.wait(), if !exited => {
-                exited = true;
-                match result {
-                    Ok(status) => exit_code = status.code(),
-                    Err(e) => { error = Some(e.to_string()); break "error"; }
-                }
-                if let Err(e) = backend.terminate_tree().await { error = Some(e); break "error"; }
-                if eof.iter().all(|ended| *ended) { break "exited"; }
-            }
-            event = backend.events.recv(), if !eof.iter().all(|ended| *ended) => {
+            event = backend.next() => {
                 let (index, data, ended) = match event {
                     Some(Event::Data(index, data)) => (index, data, false),
                     Some(Event::Eof(index)) => { eof[index] = true; (index, Vec::new(), true) }
+                    Some(Event::Exited(code)) => {
+                        exited = true;
+                        exit_code = code;
+                        if eof.iter().all(|ended| *ended) { break "exited"; }
+                        continue;
+                    }
                     Some(Event::Error(e)) => { error = Some(e); break "error"; }
                     None => { error = Some("output channel closed before EOF".into()); break "error"; }
                 };
@@ -76,6 +73,7 @@ pub async fn execute(
             }
         }
     };
+    let pid = backend.pid();
     match backend.finish().await {
         Ok(code) => exit_code = code,
         Err(e) => {
@@ -87,7 +85,7 @@ pub async fn execute(
     }
     let mut result = json!({
         "status": if error.is_some() { "error" } else { status },
-        "os_pid": backend.pid, "process_running": false, "exit_code": exit_code,
+        "os_pid": pid, "process_running": false, "exit_code": exit_code,
         "elapsed_ms": started.elapsed().as_millis() as u64, "bytes_seen": bytes,
         "output_tail": {"stdout": tails[0], "stderr": tails[1]},
         "log_dir": logs.directory, "logs_rotated": logs.rotated,
