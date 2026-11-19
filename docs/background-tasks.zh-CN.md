@@ -10,10 +10,17 @@
 
 Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 App Server daemon。
 提交任务时，原聊天须已加载。worker 通过 `codex app-server proxy` 连接配置的 daemon。
-daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
+在 Windows 和 Linux 上，daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
 这对 Windows 尤为必要，因为 Codex 明确禁止子进程脱离 MCP Job Object。
 启动器遵循宿主的命令策略；不支持或拒绝启动时会明确报错。
 Windows worker 不继承启动器句柄，任务输出流不会拖住短暂的启动确认。
+
+在 macOS 上，插件使用已有的任务存储访问权限启动独立 worker。
+worker 将用户请求的命令交给同一个 App Server，宿主按现有权限配置执行。
+worker 将 stdout 和 stderr 写入任务日志，并保存宿主返回的退出码。
+宿主在此路径上不提供操作系统进程 ID，因此 `result.os_pid` 为 null。
+命令运行期间需要保持共享 App Server 连接，宿主提前退出时 TerminalHook 可保存连接错误。
+
 `check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
 提交会在启动命令前失败。宿主必须提供共享控制端点，仅有桌面 App Server 进程或磁盘上的
 socket 文件不能证明可连接。使用 `stdio` 通道启动的服务只接受其所属客户端的连接，

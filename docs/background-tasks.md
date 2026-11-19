@@ -13,12 +13,21 @@ periodic hook, Stop hook, a second app server, or `codex exec`.
 The Codex host must supply `threadId` in MCP request metadata and have a running
 shared app-server daemon with the original chat loaded at submission. The worker
 connects to the configured daemon through `codex app-server proxy`.
-The daemon runs a short `command/exec` launcher, which starts the worker outside
+On Windows and Linux the daemon runs a short `command/exec` launcher, which starts the worker outside
 the MCP server's process containment. This is necessary on Windows, where
 Codex deliberately forbids children escaping its MCP Job Object. The launcher
 uses the host's command policy; an unsupported or denied launch fails visibly.
 Windows workers inherit no launcher handles, so open task streams cannot delay
 the short launch acknowledgment.
+
+On macOS the plugin starts the detached worker with its existing access to
+task storage. The worker asks the same App Server to run the requested command
+under its configured permissions. It streams stdout and stderr into the task
+logs and saves the host's exit code. The host does not return an OS PID on this
+route, so `result.os_pid` is null. The command needs the shared App Server
+connection for its lifetime. TerminalHook can save a connection failure if the
+host exits before the command finishes.
+
 `check_background {}` checks this route without starting a model turn. A host
 without the metadata or daemon is rejected before any command starts. The
 host must expose a shared control endpoint; merely having a desktop app-server

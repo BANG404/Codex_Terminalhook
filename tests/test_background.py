@@ -133,7 +133,12 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(self.call("list_tasks", owner=OTHER)["tasks"], [])
 
     def test_delivery_retains_proxy_diagnostics_in_saved_state(self):
-        job = self.submit("import time; time.sleep(.7); print('saved before delivery')")
+        started = self.root / "command-started"
+        job = self.submit(
+            f"from pathlib import Path; import time; Path({str(started)!r}).touch(); "
+            "time.sleep(.7); print('saved before delivery')"
+        )
+        self.await_state(job, lambda state: started.exists())
         (self.root / "proxy-error").write_text("original host connection refused 中文", encoding="utf-8")
         state = self.await_state(job, lambda state: state["delivery"] == "failed")
         self.assertEqual(state["status"], "completed")
@@ -483,7 +488,10 @@ class BackgroundTests(unittest.TestCase):
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
         self.assertEqual(state["status"], "cancelled")
         self.assertTrue(wait_for_exit(int(marker.read_text()), timeout=5))
-        self.assertTrue(wait_for_exit(state["result"]["os_pid"], timeout=5))
+        if sys.platform == "darwin":
+            self.assertIsNone(state["result"]["os_pid"])
+        else:
+            self.assertTrue(wait_for_exit(state["result"]["os_pid"], timeout=5))
 
     @unittest.skipUnless(os.environ.get("TERMINALHOOK_LONG_WAIT") == "1", "set TERMINALHOOK_LONG_WAIT=1")
     def test_background_long_wait_survives_disconnect(self):

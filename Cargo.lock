@@ -912,6 +912,7 @@ dependencies = [
 name = "terminalhook"
 version = "0.5.0"
 dependencies = [
+ "data-encoding",
  "fs2",
  "futures-util",
  "libc",
