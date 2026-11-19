@@ -44,19 +44,16 @@ pub async fn execute(
             biased;
             _ = cancellation.cancelled() => break "cancelled",
             _ = &mut deadline => break "timeout",
-            result = backend.process.wait(), if !exited => {
-                exited = true;
-                match result {
-                    Ok(status) => exit_code = status.code(),
-                    Err(e) => { error = Some(e.to_string()); break "error"; }
-                }
-                if let Err(e) = backend.terminate_tree().await { error = Some(e); break "error"; }
-                if eof.iter().all(|ended| *ended) { break "exited"; }
-            }
-            event = backend.events.recv(), if !eof.iter().all(|ended| *ended) => {
+            event = backend.next() => {
                 let (index, data, ended) = match event {
                     Some(Event::Data(index, data)) => (index, data, false),
                     Some(Event::Eof(index)) => { eof[index] = true; (index, Vec::new(), true) }
+                    Some(Event::Exited(code)) => {
+                        exited = true;
+                        exit_code = code;
+                        if eof.iter().all(|ended| *ended) { break "exited"; }
+                        continue;
+                    }
                     Some(Event::Error(e)) => { error = Some(e); break "error"; }
                     None => { error = Some("output channel closed before EOF".into()); break "error"; }
                 };
@@ -76,18 +73,27 @@ pub async fn execute(
             }
         }
     };
-    match backend.finish().await {
-        Ok(code) => exit_code = code,
-        Err(e) => {
-            error.get_or_insert(e);
+    let pid = backend.pid();
+    let process_running = match backend.finish().await {
+        Ok(code) => {
+            exit_code = code;
+            Some(false)
         }
-    }
+        Err(e) => {
+            if let Some(previous) = error.as_mut() {
+                previous.push_str(&format!("; cleanup: {e}"));
+            } else {
+                error = Some(e);
+            }
+            None
+        }
+    };
     if let Err(e) = logs.flush().await {
         error.get_or_insert(e);
     }
     let mut result = json!({
         "status": if error.is_some() { "error" } else { status },
-        "os_pid": backend.pid, "process_running": false, "exit_code": exit_code,
+        "os_pid": pid, "process_running": process_running, "exit_code": exit_code,
         "elapsed_ms": started.elapsed().as_millis() as u64, "bytes_seen": bytes,
         "output_tail": {"stdout": tails[0], "stderr": tails[1]},
         "log_dir": logs.directory, "logs_rotated": logs.rotated,

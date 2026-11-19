@@ -159,6 +159,81 @@ fn socket_path() -> Result<PathBuf, String> {
     Ok(home.join("terminalhook/desktop-host/control.sock"))
 }
 
+#[cfg(unix)]
+fn create_private_directory(directory: &Path) -> Result<(), String> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)
+        .map_err(|error| format!("Cannot create Desktop socket directory: {error}"))?;
+    let metadata = std::fs::symlink_metadata(directory).map_err(|error| error.to_string())?;
+    if !metadata.is_dir()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+    {
+        return Err(format!(
+            "Desktop socket directory must be a private directory owned by this user: {}",
+            directory.display()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn clear_stale_socket(path: &Path) -> Result<(), String> {
+    use std::{io::ErrorKind, os::unix::fs::FileTypeExt};
+
+    let entry = match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("Cannot inspect Desktop socket: {error}")),
+        Ok(metadata) => metadata,
+    };
+    // Codex on macOS can publish the requested path as an alias to its socket.
+    let target = if entry.file_type().is_symlink() {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Some(metadata),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(error) => return Err(format!("Cannot inspect Desktop socket target: {error}")),
+        }
+    } else {
+        Some(entry)
+    };
+    if let Some(metadata) = target {
+        if !metadata.file_type().is_socket() {
+            return Err(format!(
+                "Desktop socket path is occupied: {}",
+                path.display()
+            ));
+        }
+        match timeout(
+            Duration::from_secs(1),
+            tokio::net::UnixStream::connect(path),
+        )
+        .await
+        {
+            Ok(Err(error))
+                if matches!(
+                    error.kind(),
+                    ErrorKind::ConnectionRefused | ErrorKind::NotFound
+                ) => {}
+            _ => {
+                return Err(format!(
+                    "Desktop socket is in use or inaccessible: {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    // Unlink the configured path only. The native CLI owns the target of any alias.
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Cannot remove stale Desktop socket: {error}")),
+    }
+}
+
 fn server_args(args: &[OsString]) -> Result<Vec<OsString>, String> {
     let mut result = Vec::new();
     let mut args = args.iter();
@@ -274,6 +349,7 @@ async fn run(program: &Path, args: &[OsString]) -> Result<(), String> {
     if !socket_path.is_absolute() {
         return Err("Desktop socket path must be absolute".into());
     }
+    let mut args = server_args(args)?;
     let directory = socket_path.parent().ok_or("Missing socket parent")?;
     #[cfg(windows)]
     std::fs::create_dir_all(
@@ -283,22 +359,43 @@ async fn run(program: &Path, args: &[OsString]) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| e.to_string())?;
-    }
+    let lock_path = {
+        std::os::unix::net::SocketAddr::from_pathname(&socket_path)
+            .map_err(|error| format!("Invalid Desktop socket path; use a shorter TERMINALHOOK_DESKTOP_SOCKET path: {error}"))?;
+        create_private_directory(directory)?;
+        directory.join(".terminalhook-desktop-host.lock")
+    };
+    #[cfg(windows)]
+    let lock_path = directory.with_extension("lock");
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(directory.with_extension("lock"))
+        .open(lock_path)
         .map_err(|e| e.to_string())?;
     lock.try_lock_exclusive()
         .map_err(|_| "A desktop shared host already owns this endpoint")?;
-    let mut args = server_args(args)?;
+    #[cfg(unix)]
+    clear_stale_socket(&socket_path).await?;
+
+    #[cfg(unix)]
+    let (mut terminate, mut interrupt) = {
+        use tokio::signal::unix::{SignalKind, signal};
+        (
+            signal(SignalKind::terminate()).map_err(|error| error.to_string())?,
+            signal(SignalKind::interrupt()).map_err(|error| error.to_string())?,
+        )
+    };
+    let shutdown = async {
+        #[cfg(unix)]
+        tokio::select! {
+            _ = terminate.recv() => (),
+            _ = interrupt.recv() => (),
+        }
+        #[cfg(not(unix))]
+        std::future::pending::<()>().await;
+    };
     args.extend([
         OsString::from("--listen"),
         OsString::from(format!("unix://{}", socket_path.display())),
@@ -313,23 +410,31 @@ async fn run(program: &Path, args: &[OsString]) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("Cannot launch Desktop's Codex core: {e}"))?;
     let mut stderr = CapturedStderr::start(server.stderr.take().unwrap());
+    let result = tokio::select! {
+        biased;
+        _ = shutdown => Ok(()),
+        result = serve_desktop(program, &socket_path, &mut server) => result,
+    };
+    let _ = server.kill().await;
+    let _ = timeout(Duration::from_millis(200), &mut stderr.task).await;
+    result.map_err(|error| format!("{error}\nCodex core stderr tail:\n{}", stderr.text()))
+}
+
+async fn serve_desktop(
+    program: &Path,
+    socket_path: &Path,
+    server: &mut Child,
+) -> Result<(), String> {
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     let (mut proxy, _proxy_stderr, mut socket) = loop {
         if let Some(status) = server.try_wait().map_err(|e| e.to_string())? {
-            let _ = timeout(Duration::from_millis(200), &mut stderr.task).await;
-            return Err(format!(
-                "Desktop's Codex core exited: {status}\n{}",
-                stderr.text()
-            ));
+            return Err(format!("Desktop's Codex core exited: {status}"));
         }
-        match open_proxy(program, &socket_path).await {
+        match open_proxy(program, socket_path).await {
             Ok(connected) => break connected,
             Err(error) if Instant::now() >= deadline => {
-                let _ = server.kill().await;
-                let _ = timeout(Duration::from_millis(200), &mut stderr.task).await;
                 return Err(format!(
-                    "Desktop shared endpoint did not become ready: {error}\n{}",
-                    stderr.text()
+                    "Desktop shared endpoint did not become ready: {error}"
                 ));
             }
             Err(_) => sleep(Duration::from_millis(100)).await,
@@ -341,13 +446,11 @@ async fn run(program: &Path, args: &[OsString]) -> Result<(), String> {
     };
     let _ = timeout(Duration::from_secs(1), socket.close(None)).await;
     let _ = proxy.kill().await;
-    let _ = server.kill().await;
-    let _ = timeout(Duration::from_millis(200), &mut stderr.task).await;
-    result.map_err(|error| format!("{error}\nCodex core stderr tail:\n{}", stderr.text()))
+    result
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if std::env::args().any(|arg| arg == "--host-version") {
+    if std::env::args_os().any(|arg| arg == "--host-version") {
         println!("terminalhook-desktop-host {}", env!("TERMINALHOOK_VERSION"));
         return Ok(());
     }
@@ -367,13 +470,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     if !is_server(&args) {
         let mut command = std::process::Command::new(program);
+        command.args(args);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            return Err(command.exec().into());
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
+            let status = command.status()?;
+            std::process::exit(status.code().unwrap_or(1));
         }
-        let status = command.args(args).status()?;
-        std::process::exit(status.code().unwrap_or(1));
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

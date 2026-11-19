@@ -224,10 +224,12 @@ pub async fn submit(
         result["reused"] = json!(true);
         return Ok(result);
     }
-    let mut host = tokio::select! {
+    let host = tokio::select! {
         result=async {let mut host=Bridge::connect().await?;host.verify_thread(thread_id).await?;Ok::<_,String>(host)}=>result?,
         _=cancellation.cancelled()=>return Err("background submission cancelled before command launch".into()),
     };
+    #[cfg(not(target_os = "macos"))]
+    let mut host = host;
     if cancellation.is_cancelled() {
         return Err("background submission cancelled before command launch".into());
     }
@@ -240,8 +242,12 @@ pub async fn submit(
     write_json(&path.join("request.json"), &job)?;
     let mut state = json!({"task_id":task_id,"thread_id":thread_id,"status":"queued","delivery":"pending","created_at_ms":now_ms()});
     write_json(&path.join("state.json"), &state)?;
-    // Ask the existing host to launch outside the MCP server's process containment.
-    // In particular, Codex's Windows MCP Job Object deliberately forbids breakaway.
+    // The macOS coordinator needs only the plugin's existing task-store access.
+    // It delegates the requested command back to Codex under its normal policy.
+    #[cfg(target_os = "macos")]
+    let launched = launch_local_worker(&path);
+    // On Windows the MCP Job Object deliberately forbids local breakaway.
+    #[cfg(not(target_os = "macos"))]
     let launched = host.launch_worker(&path).await;
     host.close().await;
     match launched {
@@ -266,6 +272,20 @@ pub async fn submit(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn launch_local_worker(path: &Path) -> Result<u32, String> {
+    let mut child = tokio::process::Command::from(detached_worker_command(path)?)
+        .spawn()
+        .map_err(err)?;
+    let pid = child.id().ok_or("worker PID is missing")?;
+    // Reap completed workers while MCP stays active. Dropping this wait on
+    // disconnect leaves the detached child running.
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
+    Ok(pid)
+}
+
 pub fn spawn_worker(path: &Path) -> Result<u32, String> {
     #[cfg(windows)]
     {
@@ -273,33 +293,37 @@ pub fn spawn_worker(path: &Path) -> Result<u32, String> {
     }
     #[cfg(unix)]
     {
-        use std::process::Stdio;
-        let diagnostics = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path.join("worker.log"))
-            .map_err(err)?;
-        let mut command = std::process::Command::new(std::env::current_exe().map_err(err)?);
-        command
-            .arg("--background-worker")
-            .arg(path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(diagnostics);
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            unsafe {
-                command.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-        }
-        command.spawn().map(|child| child.id()).map_err(err)
+        detached_worker_command(path)?
+            .spawn()
+            .map(|child| child.id())
+            .map_err(err)
     }
+}
+
+#[cfg(unix)]
+fn detached_worker_command(path: &Path) -> Result<std::process::Command, String> {
+    use std::{os::unix::process::CommandExt, process::Stdio};
+    let diagnostics = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path.join("worker.log"))
+        .map_err(err)?;
+    let mut command = std::process::Command::new(std::env::current_exe().map_err(err)?);
+    command
+        .arg("--background-worker")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(diagnostics);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(command)
 }
 
 pub async fn get(id: &str, thread_id: &str) -> Result<Value, String> {
@@ -632,21 +656,15 @@ async fn run_worker(path: &Path) -> Result<(), String> {
     control_task.abort();
     let result = match result {
         Ok(result) => result,
-        Err(error) => {
-            json!({"status":if cancellation.is_cancelled(){"cancelled"}else{"error"},"message":error})
-        }
+        Err(error) => json!({"status":"error","message":error}),
     };
     write_json(&path.join("result.json"), &result)?;
-    state["status"] = json!(if cancellation.is_cancelled() {
-        "cancelled"
-    } else if result["status"] == "timeout" {
-        "timed_out"
-    } else if result["status"] == "error"
-        || (result["status"] == "exited" && result["exit_code"] != 0)
-    {
-        "failed"
-    } else {
-        "completed"
+    state["status"] = json!(match result["status"].as_str() {
+        Some("cancelled") => "cancelled",
+        Some("timeout") => "timed_out",
+        Some("error") => "failed",
+        Some("exited") if result["exit_code"] != 0 => "failed",
+        _ => "completed",
     });
     state["finished_at_ms"] = json!(now_ms());
     write_json(&path.join("state.json"), &state)?;

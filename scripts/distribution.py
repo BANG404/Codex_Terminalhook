@@ -18,6 +18,7 @@ COMMON_FILES = {
     "plugins/terminalhook/skills/terminal-wait/SKILL.md",
     "plugins/terminalhook/skills/terminal-wait/scripts/Initialize-Utf8.ps1",
 }
+MACOS_DESKTOP_LAUNCHER = "Start-DesktopSharedHost.sh"
 
 
 def host_platform(system=None, machine=None):
@@ -70,7 +71,10 @@ def mcp_config(target):
 def expected_files(target):
     if target not in PLATFORMS:
         raise ValueError("Unsupported distribution target")
-    return COMMON_FILES | {"plugins/terminalhook/bin/" + name for name in (binary_name(target), desktop_host_binary_name(target))}
+    files = COMMON_FILES | {"plugins/terminalhook/bin/" + name for name in (binary_name(target), desktop_host_binary_name(target))}
+    if target.startswith("macos-"):
+        files.add(MACOS_DESKTOP_LAUNCHER)
+    return files
 
 
 def package_files(archive, info, target="windows-x64"):

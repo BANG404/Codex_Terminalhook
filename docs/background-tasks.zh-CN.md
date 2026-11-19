@@ -10,10 +10,17 @@
 
 Codex 宿主必须在 MCP 请求元数据中提供 `threadId`，并运行共享 App Server daemon。
 提交任务时，原聊天须已加载。worker 通过 `codex app-server proxy` 连接配置的 daemon。
-daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
+在 Windows 和 Linux 上，daemon 使用短暂的 `command/exec` 启动器，在 MCP 服务的进程管理范围之外启动 worker。
 这对 Windows 尤为必要，因为 Codex 明确禁止子进程脱离 MCP Job Object。
 启动器遵循宿主的命令策略；不支持或拒绝启动时会明确报错。
 Windows worker 不继承启动器句柄，任务输出流不会拖住短暂的启动确认。
+
+在 macOS 上，插件使用已有的任务存储访问权限启动独立 worker。
+worker 将用户请求的命令交给同一个 App Server，宿主按现有权限配置执行。
+worker 将 stdout 和 stderr 写入任务日志，并保存宿主返回的退出码。
+宿主在此路径上不提供操作系统进程 ID，因此 `result.os_pid` 为 null。
+命令运行期间需要保持共享 App Server 连接，宿主提前退出时 TerminalHook 可保存连接错误。
+
 `check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
 提交会在启动命令前失败。宿主必须提供共享控制端点，仅有桌面 App Server 进程或磁盘上的
 socket 文件不能证明可连接。使用 `stdio` 通道启动的服务只接受其所属客户端的连接，
@@ -40,6 +47,10 @@ App Server（CLI 0.169.0-alpha.11.1），默认共享 socket 返回 Windows 错�
 不会启动替代 daemon、将聊天恢复到另一个服务，也不会在预检失败后执行命令。
 需要选择已经运行且拥有原聊天的共享宿主，或使用宿主终端。
 模拟 socket 测试不能证明原生桌面回调能力。
+
+macOS 上的 Desktop 26.1111.71704（内置 CLI 0.169.1）也通过 stdio 运行原聊天。
+默认控制 socket 不存在，内置代理在 WebSocket 握手前以
+`No such file or directory` 退出。
 
 ### 可选的 Windows 桌面共享宿主
 
@@ -71,6 +82,28 @@ Windows socket ACL 由 Codex 自行创建，适配器不放宽权限。
 桌面版本的 CLI 协议不兼容时会明确失败。
 Windows 使用由操作系统管理的进程 Job；桌面强制终止适配器时，也会清理其核心、代理及
 转发 CLI 的子进程。仍允许 worker 显式脱离；关闭界面不会取消独立后台任务。
+
+### 可选的 macOS 桌面共享宿主
+
+退出 Codex Desktop 后，在解压的 macOS 安装包中运行：
+
+```sh
+sh ./Start-DesktopSharedHost.sh
+```
+
+启动器默认使用 `/Applications/ChatGPT.app`。安装在其他位置时可用
+`--desktop-app` 指定。源码构建可运行
+`sh scripts/Start-DesktopSharedHost.sh --host-adapter target/debug/terminalhook-desktop-host`。
+启动器使用所选桌面的内置 CLI，通过 Launch Services 将适配器覆盖项传给本次启动。
+它会保留已运行的桌面进程。
+
+与 Windows 一样，适配器让桌面和 TerminalHook 共用一个核心。请在该桌面会话中重新打开原聊天，
+提交任务前调用 `check_background` 确认。正常打开桌面应用即可恢复默认传输。
+如需使用自定义 `CODEX_HOME`，可在启动时传给脚本。如果这导致 Unix socket 路径过长，
+请用 `TERMINALHOOK_DESKTOP_SOCKET` 指向专用私有目录中的较短绝对路径。
+适配器为缺失目录设置仅所有者可访问的权限，并拒绝使用被占用的端点，包括 macOS 符号链接指向的活动 socket。
+链接失效时，适配器只移除链接，目标路径由内置 CLI 管理。
+正常退出或收到终止信号时会关闭核心和代理。强制杀死适配器后，仍在监听的端点会阻止再次启动。
 
 ## 提交一次，等待结果交付
 
@@ -115,6 +148,10 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 自然退出结果为 `status: "exited"`，退出码非零时任务为 `failed`，到期时为 `timed_out`。
 结果不再提供连接内进程 ID 或输出游标；任务操作使用持久 `task_id`。
 输出命中对应结果中的 `matched`，并报告清理后的真实退出码；主动终止可能产生非零退出码。
+
+`cancellation_requested` 表示取消请求已受理。macOS worker 以宿主返回的命令退出回执
+确认终止，也适用于命令在终止请求传输期间自然退出的情况。若清理阶段无法确认命令已停止，
+任务标记为 `failed`，结果附带诊断信息，`process_running` 为 `null`，表示状态未知。
 
 结果先写入磁盘，再通过带独立 `toolOutput` 的 `turn/start` 交付。
 原聊天正在执行时，Codex 将结果排入该回合；空闲时启动新回合。
