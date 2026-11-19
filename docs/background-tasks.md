@@ -118,8 +118,10 @@ transport. To use a custom `CODEX_HOME`, set it for the launcher. If that home
 makes the Unix socket path too long, set `TERMINALHOOK_DESKTOP_SOCKET` to a
 shorter absolute path inside a dedicated private directory. The adapter creates
 missing directories with owner-only permissions and rejects an occupied
-endpoint. A normal shutdown or termination signal stops the adapter's core
-and proxy. After a force kill, a live endpoint still blocks a second launch.
+endpoint, including an active socket behind a macOS alias. When the alias is
+stale, the adapter removes the link and leaves the target to the native CLI.
+A normal shutdown or termination signal stops the adapter's core and proxy.
+After a force kill, a live endpoint still blocks a second launch.
 
 ## Submit once, then wait for delivery
 
