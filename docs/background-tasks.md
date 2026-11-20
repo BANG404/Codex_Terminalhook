@@ -247,6 +247,32 @@ Both the details and command output use `ScrollArea`. Focus the Output region
 to scroll it with the keyboard. The surrounding panel follows the host theme
 and requests that the host hide the MCP Apps frame.
 
+### Task panel preview
+
+**While the task runs (light theme).** The execution badge shows `running`,
+the delivery badge shows `pending`, and **Exit** shows `—` until an exit code
+is available. The terminal section shows the command output captured so far.
+
+![Light task card for validate-project with running and pending badges, Exit —, and command output](assets/task-panel-running.png)
+
+**After a successful run (light theme).** The example shows `completed`,
+**Exit** `0`, and the final command output. The `delivered` badge indicates
+that Codex accepted the result for the originating chat.
+
+![Light task card for validate-project with completed and delivered badges, Exit 0, and the final command output](assets/task-panel-completed.png)
+
+**After a failed run (dark theme).** In this example, `sh` exits with code `1`.
+The `failed` badge and highlighted command row describe the execution. The
+`delivered` badge still appears because Codex accepted the failure result.
+
+![Dark task card for validate-project with failed and delivered badges, Exit 1, and the failed command output](assets/task-panel-failed.png)
+
+These screenshots show the embedded panel in a browser test host. The panel
+follows the host theme. In a text-only host, use the structured tool result to
+read the execution state, exit code, and output.
+
+### How the panel updates
+
 After the MCP Apps initialize handshake, the panel waits for the originating
 `ui/notifications/tool-input` or `ui/notifications/tool-result` callback to identify
 the task. It never calls `list_tasks`. When the callback lacks a task revision,

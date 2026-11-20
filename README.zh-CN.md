@@ -18,7 +18,7 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、�
 对应调用分发、连接内会话、游标续读、保留进程控制及 PTY 后端也已删除。
 现有集成需迁移到下述后台任务流程；前台和交互式命令请使用宿主终端。
 
-[安装](#安装与升级) · [任务工具](#任务工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
+[安装](#安装与升级) · [任务工具](#任务工具) · [任务面板预览](docs/background-tasks.zh-CN.md#任务面板预览) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
 
 ## 安装与升级
 

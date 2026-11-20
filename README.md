@@ -24,6 +24,7 @@ backend are removed too. Existing integrations must migrate to the background
 workflow below; use the host terminal for foreground or interactive commands.
 
 [Installation](#installation-and-upgrades) · [Task tools](#task-tools) ·
+[Task panel preview](docs/background-tasks.md#task-panel-preview) ·
 [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) ·
 [Development and releases](docs/releasing.md)
 
