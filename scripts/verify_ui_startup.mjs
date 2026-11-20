@@ -66,6 +66,7 @@ export async function verifyStartup(browser, html) {
         await frame.getByText("Waiting for this tool’s task…", { exact: true }).first().waitFor();
         assert.deepEqual(await page.evaluate(() => window.toolCalls), []);
       } else {
+        await frame.getByRole("button", { name: "Ran build", exact: true }).waitFor({ timeout: 5000 });
         await frame.locator("#detail pre").filter({ hasText: "Startup recovered" }).waitFor({ timeout: 5000 });
         await page.waitForFunction(() => window.watchRevision === "0000000000000002", null, { timeout: 5000 });
         const calls = await page.evaluate(() => window.toolCalls);

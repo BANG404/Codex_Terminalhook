@@ -129,11 +129,11 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 稳定的 `task_key` 在同一聊天中唯一：参数相同的重复提交返回已有任务，参数不同则拒绝。
 提交失败或被中断后，应先核查原任务，再决定是否使用新键。
 
-`timeout_ms` 可省略或设为 `null`，表示无执行期限；有限期限接受
-1–31536000000 毫秒（一年）。它属于 worker，独立于 660 秒的 MCP 请求超时，
-不受单次 MCP 工具调用时限约束。
-无执行期限时，worker 等待命中、退出、主动取消或 worker/宿主故障；
-不代表能够跨越重启或断电恢复执行。
+等待 CI、构建或部署时，默认省略 `until` 和 `timeout_ms`，由原生等待命令在操作结束时退出。
+对于 GitHub Actions，使用 `gh run watch <run-id> --repo <owner/repo> --exit-status`。
+只有用户或操作明确要求时，才为 worker、Shell 或等待命令设置有限期限。
+`timeout_ms` 接受 1–31536000000 毫秒（一年）。省略或设为 `null` 时，worker 没有执行期限。
+MCP 请求超时只约束提交调用。worker 独立运行，在命中、退出、主动取消或运行环境发生故障时停止。
 
 省略 `until` 或使用 `[]` 表示等待自然退出。
 可选 `until`、`streams`、`match_mode` 使用终端工具原有正则规则。
@@ -193,9 +193,11 @@ MCP 断连不会停止已提交的后台 worker；删除状态前应明确取消
 
 Svelte 界面使用 [shadcn-svelte](https://www.shadcn-svelte.com/) 组件，
 不提供任务列表、搜索或状态筛选。点击“详情”展开任务标识、期限和交付回执。
-桌面和窄屏均使用紧凑布局，输出在面板内部滚动。面板采用透明背景，不绘制卡片外框，
-并请求宿主隐藏 MCP Apps 外框；输出区保留主题底色和边框以便阅读。
-主题跟随宿主，控件支持键盘焦点和无障碍名称。
+输出区使用 shadcn-svelte 的 [Terminal 模式](https://shadcn-svelte.com/docs/ai-elements/terminal)。
+命令行以红色标出失败状态，点击可折叠或展开缩进的 Code Block。
+代码块默认展开，宽度随面板自适应，并跟随宿主主题。长行会自动换行。
+详情区和命令输出均使用 `ScrollArea`。将焦点移到 Output 区域后，可以用键盘滚动。
+外围面板跟随宿主主题，并请求宿主隐藏 MCP Apps 外框。
 
 完成 MCP Apps 握手后，面板等待当前工具的 `ui/notifications/tool-input` 或
 `ui/notifications/tool-result` 回调确定任务，不调用 `list_tasks`。

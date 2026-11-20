@@ -158,11 +158,14 @@ model turn and await the result; do not keep querying `get_task`. A stable
 returns the existing task; different arguments are rejected. A failed or
 interrupted submission must be inspected before choosing a new key.
 
-`timeout_ms` is optional. Omit it or use `null` for no execution deadline; finite
-deadlines accept 1–31536000000 milliseconds (one year). This deadline belongs to
-the worker, independently of the 660-second MCP request timeout. No execution deadline means the worker
-waits until a match, exit, cancellation, or worker/host failure; it is not a
-guarantee of surviving a reboot or power loss.
+For CI, builds, and deployments, omit both `until` and `timeout_ms` by default
+and let the native wait command exit on completion. For GitHub Actions, use
+`gh run watch <run-id> --repo <owner/repo> --exit-status`. Add a finite worker,
+shell, or watcher deadline only when the user or the operation explicitly
+requires one. A finite `timeout_ms` accepts 1–31536000000 milliseconds (one
+year). Omission or `null` leaves the worker without an execution deadline.
+The MCP request timeout governs the submission call. The worker runs
+independently until a match, exit, cancellation, or worker or host failure.
 
 Omit `until` or use `[]` to wait for natural exit. Optional `until`, `streams`,
 and `match_mode` use the terminal tool's regex rules. A match or deadline
@@ -235,11 +238,14 @@ available for explicit chat-wide inspection and does not open a panel.
 
 The Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/) components.
 There is no task list, search, or status filter. Details expands task identifiers,
-deadlines, and delivery receipts. Output scrolls inside the compact panel on both
-desktop and narrow screens. The panel has a transparent background and no outer
-card border, and requests that the host hide the MCP Apps frame. The output area
-keeps its themed background and border for readability. Theme changes follow the
-host; controls have keyboard focus and accessible names.
+deadlines, and delivery receipts. Output uses the shadcn-svelte
+[Terminal pattern](https://shadcn-svelte.com/docs/ai-elements/terminal).
+The command row highlights failures and toggles an indented Code Block that
+starts open and fills the available panel width. The code block follows the
+host theme and wraps long lines.
+Both the details and command output use `ScrollArea`. Focus the Output region
+to scroll it with the keyboard. The surrounding panel follows the host theme
+and requests that the host hide the MCP Apps frame.
 
 After the MCP Apps initialize handshake, the panel waits for the originating
 `ui/notifications/tool-input` or `ui/notifications/tool-result` callback to identify
