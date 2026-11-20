@@ -180,8 +180,8 @@ refresh evidence for that branch's current tree. Actions are pinned to commit SH
 ### Test layers and gates
 
 The protocol suite supplies black-box, boundary, integration, and
-permission/isolation checks. CI and Assurance share the security workflow.
-Release calls the reusable Assurance workflow for security, coverage, mutation,
+permission/isolation checks. CI, Assurance, and Release share the security workflow.
+Alpha Release calls the reusable Assurance workflow for coverage, mutation,
 and performance checks. Failures in required verification block publication.
 
 The dashboard's build dependencies temporarily use the pinned
@@ -190,11 +190,11 @@ when the upstream package publishes a fixed release that passes the audit.
 
 | Layer | Execution | Gate |
 | --- | --- | --- |
-| Boundary and white-box | Rust unit tests in alpha CI and Release; coverage in scheduled or manual Assurance and Release | All tests pass; the coverage job requires 90% LLVM line coverage in each of `spec.rs` and `matcher.rs` |
+| Boundary and white-box | Rust unit tests in alpha CI and alpha Release, coverage in scheduled or manual Assurance and alpha Release | All tests pass. The coverage job requires 90% LLVM line coverage in each of `spec.rs` and `matcher.rs` |
 | Black-box and integration | Release verification on five platforms | Stdio MCP, child cleanup, background bridge, and package/install/update scenarios pass |
 | Browser E2E | Release verification on Linux x64 | Real MCP dashboard scenarios pass against the final package |
-| Static analysis and dependencies | Clippy in alpha CI and Release; dependency and script scans in every PR, Assurance and Release | Clippy warnings fail. Bandit rules B602/B604/B605/B609 pass. Cargo and npm audits meet their thresholds, including npm build dependencies |
-| Mutation | Weekly, manual Assurance with `deep`, and Release verification | Every viable mutation of `validate_run` / `validate_deadline` is caught; surviving mutations, timeouts and baseline failures fail the job |
+| Static analysis and dependencies | Clippy in alpha CI and alpha Release. Dependency and script scans in every PR, Assurance and Release | Clippy warnings fail. Bandit rules B602/B604/B605/B609 pass. Cargo and npm audits meet their thresholds, including npm build dependencies |
+| Mutation | Weekly, manual Assurance with `deep`, and alpha Release | Every viable mutation of `validate_run` / `validate_deadline` is caught. Surviving mutations, timeouts and baseline failures fail the job |
 | Performance | With mutation verification on Linux x64 | 20 real background worker completions with loopback host delivery, 64 KiB output and a 64 KiB matching window; nearest-rank p95 at most 3 seconds |
 
 The coverage gate checks each required file's raw counters and fails on missing,
@@ -287,11 +287,13 @@ without changing release or marketplace refs. Enable it to publish the complete
 native platform set. All four stages use the same five-target matrix.
 
 The reusable release verification workflow checks the branch and alpha source
-evidence. Release runs on beta, rc, and main also require completed alpha
-publication for the same source tree. After these checks it builds the dashboard
-once and runs native tests, Assurance, and channel packaging for the targets
-below. Jobs verify the shared dashboard's source revision and HTML checksum.
-Packaging and native tests run in parallel.
+evidence. Alpha Release runs Rust formatting, native Clippy and unit tests, and
+Assurance coverage, mutation, and performance checks. Native tests and packaging
+run in parallel. On beta, rc, and main the workflow reuses those results by
+requiring completed alpha publication for the same source tree. Every channel
+runs fresh security scans, builds one shared dashboard bundle, and builds and
+tests its own native packages. Jobs verify the shared dashboard's source revision
+and HTML checksum.
 
 | Target | Native runner | Binary |
 | --- | --- | --- |
@@ -309,7 +311,7 @@ disconnection, 90-second UTF-8 output, and an additional PowerShell test on
 Windows. ZIPs and Git trees retain executable permissions. Linux packages use
 Ubuntu 24.04 glibc. macOS packages are unsigned and are distributed without notarization.
 
-The aggregate requires the native test and Assurance results, then validates
+The aggregate requires a successful quality gate and all native package jobs, then validates
 all source identities, checksums, native launch configs,
 binary formats, and executable permissions before publication. A release contains
 five `terminalhook-<platform>.zip` assets, one `SHA256SUMS.txt` covering all five,
