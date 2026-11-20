@@ -1,0 +1,263 @@
+name: Release verification
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: JSON matrix of supported native platforms and runners
+        type: string
+        required: true
+    outputs:
+      artifact_id:
+        description: ID of the verified release distributions in this run
+        value: ${{ jobs.package.outputs.artifact_id }}
+      artifact_digest:
+        description: SHA-256 digest of the verified distributions artifact
+        value: ${{ jobs.package.outputs.artifact_digest }}
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  policy:
+    uses: ./.github/workflows/source-policy.yml
+    with:
+      require_promotion_proof: true
+
+  security:
+    needs: policy
+    uses: ./.github/workflows/security.yml
+
+  frontend:
+    name: Shared dashboard bundle
+    needs: [policy, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Check Rust formatting
+        run: cargo fmt --check
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install, check and build the dashboard once
+        run: python scripts/dashboard.py build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dashboard-bundle
+          path: ui/dist/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+  test:
+    name: Native tests (${{ matrix.platform }})
+    needs: [policy, frontend]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      EXPECTED_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Restore native Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+      - name: Verify native host identity
+        run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dashboard-bundle
+          path: ui/dist
+      - name: Verify the shared dashboard source and checksum
+        run: python scripts/dashboard.py verify
+      - name: Check Rust lints
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Rust unit tests
+        run: cargo test --locked
+
+  assurance:
+    needs: frontend
+    uses: ./.github/workflows/assurance.yml
+    with:
+      skip_security: true
+      coverage: true
+      deep: true
+      dashboard_artifact: dashboard-bundle
+
+  quality:
+    name: Quality checks
+    if: always()
+    needs: [policy, security, frontend, test, assurance]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      POLICY: ${{ needs.policy.result }}
+      SECURITY: ${{ needs.security.result }}
+      FRONTEND: ${{ needs.frontend.result }}
+      TEST: ${{ needs.test.result }}
+      ASSURANCE: ${{ needs.assurance.result }}
+    steps:
+      - name: Require source proof, security, shared bundle and full native tests
+        run: |
+          test "$POLICY" = success
+          test "$SECURITY" = success
+          test "$FRONTEND" = success
+          test "$TEST" = success
+          test "$ASSURANCE" = success
+
+  build:
+    name: Native package (${{ matrix.platform }})
+    needs: [policy, frontend]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      EXPECTED_PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Restore native Rust dependencies
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
+      - name: Verify native host identity
+        run: python -c "from scripts.distribution import host_platform; import os; assert host_platform() == os.environ['EXPECTED_PLATFORM']"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dashboard-bundle
+          path: ui/dist
+      - name: Build the exact source with its channel version
+        run: python scripts/package.py --prebuilt-dashboard
+      - name: Exercise the final packaged binary
+        run: python scripts/verify_package.py
+      - name: Install the pinned Codex CLI
+        run: npm install --global @openai/codex@0.167.0
+      - name: Verify isolated installation and configuration preservation
+        run: python scripts/verify_plugin.py
+      - name: Verify Git migration, startup updates and installed MCP launch
+        run: python scripts/verify_git_marketplace.py
+      - name: Explicit release long-wait regressions
+        run: python scripts/verify_long_wait.py
+      - name: Verify the final release dashboard through MCP
+        if: matrix.platform == 'linux-x64'
+        env:
+          TERMINALHOOK_EXE: ${{ github.workspace }}/dist/package/plugins/terminalhook/bin/terminalhook
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run test:ui
+      - name: Stage verification evidence with the native archive
+        run: python -c "from pathlib import Path; import shutil; [shutil.copyfile(Path('artifacts') / n, Path('dist') / n) for n in ('package-validation.json', 'git-marketplace-validation.json')]"
+      - name: Upload the verified native distribution
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: terminalhook-${{ matrix.platform }}
+          path: |
+            dist/terminalhook-${{ matrix.platform }}.zip
+            dist/SHA256SUMS.txt
+            dist/build-info.json
+            dist/package-validation.json
+            dist/git-marketplace-validation.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+      - name: Upload native diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-evidence-${{ matrix.platform }}
+          path: artifacts/
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 14
+
+  package:
+    name: Package verification
+    if: always()
+    needs: [quality, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact_id: ${{ steps.release_distributions.outputs.artifact-id }}
+      artifact_digest: ${{ steps.release_distributions.outputs.artifact-digest }}
+    env:
+      QUALITY: ${{ needs.quality.result }}
+      BUILD: ${{ needs.build.result }}
+    steps:
+      - name: Require full validation and every native package
+        run: |
+          test "$QUALITY" = success
+          test "$BUILD" = success
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: terminalhook-*
+          path: dist/platforms
+      - name: Verify and assemble the complete platform set
+        run: python scripts/assemble_release.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-verification
+          path: artifacts/package-validation.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: release_distributions
+        with:
+          name: release-distributions
+          path: |
+            dist/terminalhook-*.zip
+            dist/SHA256SUMS.txt
+            dist/build-info.json
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14

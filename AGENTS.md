@@ -51,12 +51,14 @@ state before retrying a write. Escalate decisions needing credentials, review,
 protection changes, or authorization for a new deployment or release.
 
 Alpha advancement alone does not invalidate successful checks for the original
-PR HEAD. Verify the CI package report's tested merge parents and tree, and require
+PR HEAD. Verify the CI source report's tested merge parents and tree, and require
 the tested base to remain in current alpha history. Actual conflicts or source
 changes require repair and fresh checks. A non-strict required-status-check policy
 supports this model; never change protections automatically to make a PR merge.
 
 Automatic task delivery only merges into alpha. Promoting later stages and
 publishing a release remain separate actions requiring their own authorization.
+Only the Release workflow runs the complete cross-platform verification and
+packaging pipeline. Pull-request CI verifies source before delivery or promotion.
 For implementation details and the stage policy, read
 [Development and releases](docs/releasing.md).
