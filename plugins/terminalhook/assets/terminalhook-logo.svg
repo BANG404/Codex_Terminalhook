@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">TerminalHook</title>
+  <rect width="128" height="128" rx="24" fill="#191916"/>
+  <g transform="translate(13 14)">
+    <path d="M8 10 48 32h24l22 22v12L72 88H40V72h26l12-12-12-12H48L8 70V52l22-12L8 28Z" fill="#fff4dc"/>
+    <rect x="8" y="76" width="20" height="12" fill="#ffb548"/>
+  </g>
+</svg>
