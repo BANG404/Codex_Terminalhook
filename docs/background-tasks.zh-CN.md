@@ -192,12 +192,34 @@ MCP 断连不会停止已提交的后台 worker；删除状态前应明确取消
 但不打开面板。
 
 Svelte 界面使用 [shadcn-svelte](https://www.shadcn-svelte.com/) 组件，
-不提供任务列表、搜索或状态筛选。点击“详情”展开任务标识、期限和交付回执。
+不提供任务列表、搜索或状态筛选。点击 **Details** 展开任务标识、期限和交付回执。
 输出区使用 shadcn-svelte 的 [Terminal 模式](https://shadcn-svelte.com/docs/ai-elements/terminal)。
 命令行以红色标出失败状态，点击可折叠或展开缩进的 Code Block。
 代码块默认展开，宽度随面板自适应，并跟随宿主主题。长行会自动换行。
 详情区和命令输出均使用 `ScrollArea`。将焦点移到 Output 区域后，可以用键盘滚动。
 外围面板跟随宿主主题，并请求宿主隐藏 MCP Apps 外框。
+
+### 任务面板预览
+
+**任务运行中（浅色主题）。** 执行徽标显示 `running`，交付徽标显示 `pending`。
+退出码可用前，**Exit** 显示 `—`。终端区域展示当前已捕获的命令输出。
+
+![validate-project 的浅色任务卡片，显示 running、pending、Exit — 和命令输出](assets/task-panel-running.png)
+
+**任务成功后（浅色主题）。** 示例显示 `completed`、**Exit** `0` 和最终命令输出。
+`delivered` 徽标表示 Codex 已接收要交付给原聊天的结果。
+
+![validate-project 的浅色任务卡片，显示 completed、delivered、Exit 0 和最终命令输出](assets/task-panel-completed.png)
+
+**任务失败后（深色主题）。** 示例中的 `sh` 以退出码 `1` 结束。
+`failed` 徽标和高亮的命令行表示执行失败。Codex 接收失败结果后，同样会显示 `delivered`。
+
+![validate-project 的深色任务卡片，显示 failed、delivered、Exit 1 和失败的命令输出](assets/task-panel-failed.png)
+
+截图来自浏览器测试宿主中的嵌入式面板。面板会跟随宿主主题。
+在纯文本宿主中，可从结构化工具结果读取执行状态、退出码和输出。
+
+### 面板如何更新
 
 完成 MCP Apps 握手后，面板等待当前工具的 `ui/notifications/tool-input` 或
 `ui/notifications/tool-result` 回调确定任务，不调用 `list_tasks`。
