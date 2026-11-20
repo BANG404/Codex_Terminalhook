@@ -14,11 +14,28 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、�
 原生测试和分发覆盖 Windows x64、Linux x64/ARM64、macOS Intel/Apple Silicon。
 命令使用独立 stdout/stderr 管道，stdin 关闭。Windows Job Object 和 Unix 进程组负责子进程约束。
 
-本次发布移除原有同步/交互式 MCP 工具：`run_until`、`wait_output`、`write_input`、`stop_process`。
-对应调用分发、连接内会话、游标续读、保留进程控制及 PTY 后端也已删除。
-现有集成需迁移到下述后台任务流程；前台和交互式命令请使用宿主终端。
+快速或交互式命令请使用宿主终端。
 
-[安装](#安装与升级) · [任务工具](#任务工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
+[任务面板预览](#任务面板预览) · [安装](#安装与升级) · [任务工具](#任务工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
+
+## 任务面板预览
+
+在兼容 MCP Apps 的宿主中，任务面板会显示执行状态、交付状态、退出码和命令输出。
+以下截图取自浏览器测试宿主。
+
+**运行中**
+
+![浅色面板显示任务正在运行、等待交付，以及当前命令输出](docs/assets/task-panel-running.png)
+
+**成功完成**
+
+![浅色面板显示任务已完成、退出码为 0，结果已交付](docs/assets/task-panel-completed.png)
+
+**执行失败**
+
+![深色面板显示任务执行失败、退出码为 1，结果已交付](docs/assets/task-panel-failed.png)
+
+[后台任务指南](docs/background-tasks.zh-CN.md#任务面板预览)
 
 ## 安装与升级
 
@@ -53,12 +70,9 @@ sh scripts/install.sh --channel production
 从本地安装迁移时会保留插件 ID 和用户设置。迁移期间注册失败时，安装器会尝试恢复原来源和跟踪分支。
 源码检出目录提供安装脚本，marketplace 提供二进制、MCP 配置和运行期技能。
 
-### 验证后台功能
+### 桌面共享宿主
 
-新开一个 Codex 聊天，请 Codex 以 `{}` 为参数调用 `mcp__terminalhook.check_background`。
-返回 `"status": "ready"` 表示 TerminalHook 可以连接共享 App Server 并找到当前聊天。
-
-如果 Windows 或 macOS 桌面端使用 stdio 且缺少共享端点，导致预检失败，请退出桌面端。
+如果 `submit_task` 报告无法连接 Windows 或 macOS 桌面端的共享端点，请退出桌面端。
 在外部终端进入对应 Release ZIP 的解压目录，或进入 `codex plugin marketplace list` 显示的
 `terminalhook-local` Git marketplace 根目录，运行对应平台的启动器。
 
@@ -67,8 +81,8 @@ sh scripts/install.sh --channel production
 | Windows | `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` |
 | macOS | `sh ./Start-DesktopSharedHost.sh` |
 
-在启动器打开的桌面会话中新开或重新打开聊天，提交后台任务前再次运行 `check_background`。
-如果预检仍然失败，请使用宿主终端执行命令。参见[后台宿主排查指南](docs/background-tasks.zh-CN.md#连接诊断与桌面兼容性)。
+在启动器打开的桌面会话中新开或重新打开聊天，再提交任务。
+如果共享宿主仍不可用，请使用宿主终端。参见[后台宿主排查指南](docs/background-tasks.zh-CN.md#连接诊断与桌面兼容性)。
 
 ### 升级与配置迁移
 
@@ -82,8 +96,8 @@ codex plugin marketplace upgrade terminalhook-local
 （Windows 用 `-Channel`，Linux/macOS 用 `--channel`）。本地安装请用 `-Source` 或
 `--source` 指定本地包目录。安装器会将 `mcp__terminalhook` 加入
 `features.code_mode.direct_only_tool_namespaces`，并在 `submit_task` 及其 TerminalHook
-服务均未配置审批模式时，为该工具写入 `approval_mode = "approve"`。升级或迁移后新开聊天，
-再运行 `check_background`。已有聊天保留已加载的工具目录，持久后台 worker 独立继续运行。
+服务均未配置审批模式时，为该工具写入 `approval_mode = "approve"`。升级或迁移后新开聊天以加载当前工具目录。
+持久后台 worker 会独立继续运行。
 [Codex marketplace 命令](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)
 
 如需切换到已发布的预发布渠道，可为安装器的渠道选项传入 `alpha`、`beta` 或 `rc`。
@@ -119,7 +133,6 @@ codex plugin marketplace remove terminalhook-local
 
 | 工具 | 行为 |
 | --- | --- |
-| `check_background` | 验证现有共享宿主及原聊天，不启动模型回合 |
 | `submit_task` | 使用稳定的 `task_key` 提交预计耗时较长或完成时间难以预估的命令，立即返回任务 ID |
 | `list_tasks` | 明确查询原聊天的任务，不打开面板 |
 | `get_task` | 按需诊断已保存结果、执行状态和交付回执 |
@@ -129,15 +142,13 @@ codex plugin marketplace remove terminalhook-local
 
 直接调用 `mcp__terminalhook` 命名空间下的工具。安装器将其加入
 `[features.code_mode].direct_only_tool_namespaces` 并保留其他设置；手动安装插件时也需配置宿主。
-更新后新开聊天，以便工具目录移除旧接口。TerminalHook 是插件名称；当前包使用原生事件与宿主回调，
-不注册 Stop 等生命周期 Hook。历史 Stop Hook 实现保存在 [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook)。
+TerminalHook 通过原生事件与宿主回调交付完成结果。
 
 用户请求范围内的命令预计耗时较长，或可能需要等待且完成时间难以预估时，主动调用 `submit_task`。
-用户的任务请求本身足以选择后台执行。首次提交前调用 `check_background`。
-后台提交需要可连接的共享 Codex daemon、CLI proxy 及宿主提供的
-`threadId` 元数据；预检不会猜测聊天 ID，也不会启动另一个 daemon。
-只有 stdio 且没有共享端点的宿主无法提交后台任务。Windows 和 macOS 桌面端的启动器见
-[验证后台功能](#验证后台功能)。
+用户的任务请求本身足以选择后台执行。直接调用 `submit_task` 即可。
+提交新任务需要可连接的共享 Codex daemon、CLI proxy 及宿主提供的 `threadId` 元数据。
+工具会在启动前校验这些条件，失败时直接返回具体错误。
+Windows 和 macOS 桌面端的启动器见[桌面共享宿主](#桌面共享宿主)。
 
 以下示例提交一条构建命令。
 

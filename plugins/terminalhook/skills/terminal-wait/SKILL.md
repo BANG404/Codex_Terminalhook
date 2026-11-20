@@ -3,10 +3,8 @@ name: terminal-wait
 description: Proactively run commands expected to take a long time or to wait for an unpredictable duration in the background, and receive completion in the original Codex chat.
 ---
 
-TerminalHook is background-only. Its tools are `check_background`, `submit_task`,
-`list_tasks`, `get_task`, `cancel_task`, `retry_delivery`, and app-only `watch_tasks`.
-The former `run_until`, `wait_output`, `write_input`, and `stop_process` interfaces
-are removed. Do not call them or reconstruct their connection-local sessions.
+TerminalHook is background-only. Its tools are `submit_task`, `list_tasks`,
+`get_task`, `cancel_task`, `retry_delivery`, and app-only `watch_tasks`.
 Use the host's terminal for quick commands, interactive work, PTY, or service
 retention.
 Use native blocking commands for foreground waits and the host terminal's
@@ -19,20 +17,20 @@ expected to take a long time or may wait for an unpredictable duration, such as
 waiting for CI, a build, or a deployment to finish. The user's task request is
 sufficient to choose background execution.
 
-1. Use `check_background` before the first background submission. It verifies the
-   existing shared Codex daemon and original chat without starting a model turn.
-2. Submit the command with `submit_task`, using a stable
+1. Submit the command directly with `submit_task`, using a stable
    per-chat `task_key`, program/args array, and native absolute `cwd`. Use `env` for
    command environment overrides. Invoke a shell explicitly for shell syntax.
-3. For CI, builds, and deployments, omit `until` and `timeout_ms` by default so the
-   native command can run to natural exit. For GitHub Actions, submit
-   `gh run watch <run-id> --repo <owner/repo> --exit-status`. Add a worker deadline
+   Submission validates the shared host and original chat before starting a new
+   task. If validation fails, report the error returned by `submit_task`.
+2. For CI, builds, and deployments, omit `until` and `timeout_ms` by default so the
+   native command can run to natural exit. Prefer a completion event when
+   waiting for remote CI. Add a worker deadline
    or a shell or watcher timeout only when the user or the operation explicitly
    requires one. `timeout_ms` accepts 1..31536000000 ms for a finite deadline.
    The MCP request timeout governs the submission call. The worker runs
    independently. Optional output rules terminate the command on a match.
    The worker uses stdout/stderr pipes and closes stdin.
-4. After the submission returns its `task_id`, end the turn and await the host-delivered
+3. After the submission returns its `task_id`, end the turn and await the host-delivered
    result. Do not poll `get_task`/`list_tasks` or resubmit to keep waiting.
 
 Identical task keys and arguments return the existing task; changed arguments are
@@ -66,12 +64,13 @@ There is no Stop hook, periodic lifecycle hook, or replacement app server.
 
 ## Host diagnostics
 
-If preflight fails, report its actual executable, exit status, and stderr tail.
+For a proxy failure, include the executable, exit status, and stderr tail when
+the error provides them.
 The proxy prefers `TERMINALHOOK_CODEX_BIN`, then `CODEX_APP_RUNTIME_CLI_PATH`, then
 PATH; `TERMINALHOOK_PROXY_COMMAND` overrides this selection. A stdio-only desktop
 host has no shared control endpoint. Opening another chat does not create one.
 Never start a replacement daemon, resume the chat into another daemon, or change
-permissions merely to make preflight pass. Use the host terminal when no compatible
+permissions to work around a connection failure. Use the host terminal when no compatible
 shared host is available. Only the host supplies `threadId`; never guess a chat ID.
 
 ## Encoding and output

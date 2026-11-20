@@ -35,13 +35,11 @@ route, so `result.os_pid` is null. The command needs the shared App Server
 connection for its lifetime. TerminalHook can save a connection failure if the
 host exits before the command finishes.
 
-`check_background {}` checks this route without starting a model turn. A host
-without the metadata or daemon is rejected before any command starts. The
-host must expose a shared control endpoint; merely having a desktop app-server
-process or a socket file on disk does not establish availability. A server
-started with the `stdio` transport accepts its owning client's connection only.
-Opening another chat does not add a shared socket. This release exposes only
-background-task tools; use the host terminal when the bridge is unavailable.
+`submit_task` validates the request metadata, shared host, and originating chat
+before launching a new task. If validation fails, the same call returns the
+specific error before the command starts. A server using only the `stdio`
+transport accepts its owning client's connection. Use a shared control
+endpoint or run the command in the host terminal.
 
 The proxy executable is selected from `TERMINALHOOK_CODEX_BIN`, then the host's
 `CODEX_APP_RUNTIME_CLI_PATH`, then `codex` on PATH. An explicit
@@ -61,19 +59,10 @@ RPC. Failure and cancellation clean up the proxy's process tree. These are the
 proxy's diagnostics, not the background command's stdout/stderr. Delivery errors
 are also retained in the task's saved `delivery_error` state.
 
-During native Windows verification on 2026-11-16, Codex Desktop
-26.1111.2228.0 used a `stdio` app-server (CLI 0.169.0-alpha.11.1), while the
-default shared socket refused connections with Windows error 10061. Both the
-PATH CLI and desktop CLI failed to connect. Background execution and wake-up
-cannot work in that host configuration through this bridge. No replacement
-daemon is started, no chat is resumed into a different server, and no command
-is launched when preflight fails. Select an already running shared host that
-owns the original chat, or use the host terminal. Simulated socket
-tests do not prove native desktop callback support.
-
-On macOS, Desktop 26.1111.71704 (bundled CLI 0.169.1) also ran the original
-chat over stdio. The default control socket was absent. The bundled proxy
-exited with `No such file or directory` before the WebSocket handshake.
+If the proxy reports an unavailable endpoint on Windows or macOS Desktop, use
+the shared-host launcher below and reopen the chat in that Desktop session.
+If the error says the original chat is unloaded, reopen it on the shared host
+before submitting.
 
 ### Opt-in Windows Desktop shared host
 
@@ -88,9 +77,8 @@ pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1
 The launcher uses the installed Desktop CLI through a process-local
 `CODEX_CLI_PATH` override. It starts one Desktop-owned core with a private Unix
 socket, relays Desktop's JSONL connection through the native proxy, and passes
-that same socket and native CLI to the plugin and detached worker. It does not
-attach an existing stdio chat to a different server. Preflight still never starts
-a server. Existing chats must be reopened in this Desktop session before use.
+that same socket and native CLI to the plugin and detached worker. Reopen
+existing chats in this Desktop session before submitting.
 Startup policy reads, CLI subcommands, and version checks delegate unchanged.
 The launcher leaves a running Desktop untouched and refuses a normal launch
 until it is closed. It changes no persistent environment, login, approval,
@@ -128,9 +116,9 @@ The launcher uses the selected app's bundled CLI and passes the override through
 Services for this launch only. It leaves a running app untouched.
 
 The adapter gives Desktop and TerminalHook one shared core, as on Windows.
-Reopen the original chat in this Desktop session and call `check_background` to
-verify it before submitting work. A normal Desktop launch restores the default
-transport. To use a custom `CODEX_HOME`, set it for the launcher. If that home
+Reopen the original chat in this Desktop session and submit the task there.
+A normal Desktop launch restores the default transport. To use a custom
+`CODEX_HOME`, set it for the launcher. If that home
 makes the Unix socket path too long, set `TERMINALHOOK_DESKTOP_SOCKET` to a
 shorter absolute path inside a dedicated private directory. The adapter creates
 missing directories with owner-only permissions and rejects an occupied
@@ -159,8 +147,8 @@ returns the existing task; different arguments are rejected. A failed or
 interrupted submission must be inspected before choosing a new key.
 
 For CI, builds, and deployments, omit both `until` and `timeout_ms` by default
-and let the native wait command exit on completion. For GitHub Actions, use
-`gh run watch <run-id> --repo <owner/repo> --exit-status`. Add a finite worker,
+and let the native wait command exit on completion. For remote CI, prefer
+a completion event when the provider exposes one. Add a finite worker,
 shell, or watcher deadline only when the user or the operation explicitly
 requires one. A finite `timeout_ms` accepts 1–31536000000 milliseconds (one
 year). Omission or `null` leaves the worker without an execution deadline.
@@ -171,9 +159,7 @@ Omit `until` or use `[]` to wait for natural exit. Optional `until`, `streams`,
 and `match_mode` use the terminal tool's regex rules. A match or deadline
 terminates and cleans up the process tree before delivering the result. Passive
 background commands use separate stdout/stderr pipes with closed stdin. Use the
-host terminal for interactive input or PTY work. The former `run_until`,
-`wait_output`, `write_input` and `stop_process` interfaces are removed, and direct
-calls to them are rejected.
+host terminal for interactive input or PTY work.
 
 ## Inspect, cancel, and recover
 
@@ -236,6 +222,10 @@ exit code, working directory, and bounded live or saved output. The interface us
 English; task names and output retain their original text. `list_tasks` remains
 available for explicit chat-wide inspection and does not open a panel.
 
+TerminalHook supplies its [project logo](../plugins/terminalhook/assets/terminalhook-logo.svg)
+through the plugin manifest and the MCP server and panel-opening tools. The host
+chooses the icon it shows in the conversation's panel header.
+
 The Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/) components.
 There is no task list, search, or status filter. Details expands task identifiers,
 deadlines, and delivery receipts. Output uses the shadcn-svelte
@@ -246,6 +236,32 @@ host theme and wraps long lines.
 Both the details and command output use `ScrollArea`. Focus the Output region
 to scroll it with the keyboard. The surrounding panel follows the host theme
 and requests that the host hide the MCP Apps frame.
+
+### Task panel preview
+
+**While the task runs (light theme).** The execution badge shows `running`,
+the delivery badge shows `pending`, and **Exit** shows `—` until an exit code
+is available. The terminal section shows the command output captured so far.
+
+![Light task card for validate-project with running and pending badges, Exit —, and command output](assets/task-panel-running.png)
+
+**After a successful run (light theme).** The example shows `completed`,
+**Exit** `0`, and the final command output. The `delivered` badge indicates
+that Codex accepted the result for the originating chat.
+
+![Light task card for validate-project with completed and delivered badges, Exit 0, and the final command output](assets/task-panel-completed.png)
+
+**After a failed run (dark theme).** In this example, `sh` exits with code `1`.
+The `failed` badge and highlighted command row describe the execution. The
+`delivered` badge still appears because Codex accepted the failure result.
+
+![Dark task card for validate-project with failed and delivered badges, Exit 1, and the failed command output](assets/task-panel-failed.png)
+
+These screenshots show the embedded panel in a browser test host. The panel
+follows the host theme. In a text-only host, use the structured tool result to
+read the execution state, exit code, and output.
+
+### How the panel updates
 
 After the MCP Apps initialize handshake, the panel waits for the originating
 `ui/notifications/tool-input` or `ui/notifications/tool-result` callback to identify
