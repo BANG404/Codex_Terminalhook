@@ -148,13 +148,14 @@ output tails are bounded to 4096 bytes per stream; match/capture text shares an
 at 2 MiB per file with one backup. Natural-exit tasks without regex conditions
 accept long output without accumulating an unbounded matching buffer.
 
-Omit `timeout_ms` or use `null` for no execution deadline. A finite deadline is
-1–31536000000 ms and belongs to the independent worker, so work can exceed the
-660-second MCP transport limit. A match, deadline or explicit cancellation cleans
-up the process tree before saving the result. Natural root exit also cleans up
-descendants before draining final output. Windows uses a kill-on-close Job with
-a startup assignment gate; Unix uses a process group. Descendants that deliberately
-create another Unix group/session can escape that containment.
+Omit `timeout_ms` by default. Both omission and `null` leave the worker without an
+execution deadline. Set a finite deadline of 1–31536000000 ms only when the user
+or the operation explicitly requires one. The MCP request timeout governs the
+submission call. The worker runs independently. A match, deadline or explicit
+cancellation cleans up the process tree before saving the result. Natural root
+exit also cleans up descendants before draining final output. Windows uses a
+kill-on-close Job with a startup assignment gate. Unix uses a process group.
+Descendants that deliberately create another Unix group/session can escape that containment.
 
 Execution and delivery have separate states. A natural result has `status: "exited"`
 and the actual `exit_code`; nonzero exits mark the task failed. There are no

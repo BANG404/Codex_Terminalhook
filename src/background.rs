@@ -36,7 +36,9 @@ pub struct SubmitRequest {
     pub cwd: String,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
-    /// Background execution deadline in milliseconds. Omit/null to wait until match, exit, or explicit cancellation. Independent of the MCP call timeout.
+    /// Optional worker deadline in milliseconds. Omit by default (null also means no deadline).
+    /// Set only when the user or the operation explicitly requires a finite deadline.
+    /// Independent of the MCP request timeout.
     pub timeout_ms: Option<u64>,
     /// Optional output conditions. Omit/[] to wait for natural exit. A match terminates the managed process tree before delivering the result.
     #[serde(default)]
