@@ -112,7 +112,8 @@ PR 未合并便关闭时停止。修复冲突或修改源码后，必须重新�
 python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 ```
 
-省略 `--merge` 时在 CI 验证通过后返回。暂时的网络或服务端读取失败会有限重试。
+省略 `--merge` 时在 CI 验证通过后返回。CI 尚未完成时，交付脚本每分钟检查一次状态。
+暂时的网络或服务端读取失败会有限重试。
 创建 PR 或合并响应不明确时，先核实实际 PR。默认跟随期限一小时，可用
 `--timeout` 指定秒数。残留锁须先核实再删除。运行针对性回归测试：
 `python -m unittest discover -s tests -p test_delivery.py -v`。

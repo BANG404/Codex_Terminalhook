@@ -13,13 +13,23 @@ OWNER = "01a1e361-731f-7020-8ba1-5fb700728b78"
 
 
 class ProxyDiagnosticsTests(unittest.TestCase):
-    def call(self, code, name="check_background", arguments=None):
+    def setUp(self):
+        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="terminalhook proxy ")))
+
+    def submit_with_proxy(self, code, command="pass"):
+        arguments = {
+            "task_key": "proxy-diagnostic",
+            "program": sys.executable,
+            "args": ["-c", command],
+            "cwd": str(self.directory),
+        }
         with patch.dict(os.environ, {
             "TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, "-u", "-c", code]),
+            "TERMINALHOOK_TASK_DIR": str(self.directory / "tasks"),
         }):
             client = Client()
         try:
-            client.send("tools/call", {"name": name, "arguments": arguments or {}, "_meta": {"threadId": OWNER}}, 10)
+            client.send("tools/call", {"name": "submit_task", "arguments": arguments, "_meta": {"threadId": OWNER}}, 10)
             result = client.result(25)
             self.assertEqual(result["status"], "error", result)
             return result["message"]
@@ -27,14 +37,14 @@ class ProxyDiagnosticsTests(unittest.TestCase):
             client.close()
 
     def test_early_exit_reports_real_stderr_and_exit_code(self):
-        message = self.call("import sys; print('socket connection refused 中文', file=sys.stderr); sys.exit(23)")
+        message = self.submit_with_proxy("import sys; print('socket connection refused 中文', file=sys.stderr); sys.exit(23)")
         self.assertIn("socket connection refused 中文", message)
         self.assertRegex(message, r"proxy exit status:.*23")
         self.assertIn(sys.executable, message)
         self.assertIn("stdio-only desktop", message)
 
     def test_stderr_larger_than_pipe_capacity_is_drained_and_bounded(self):
-        message = self.call("import sys; sys.stderr.buffer.write(b'x'*200000 + b'\\xff\\n'); print('last error 中文', file=sys.stderr); sys.exit(24)")
+        message = self.submit_with_proxy("import sys; sys.stderr.buffer.write(b'x'*200000 + b'\\xff\\n'); print('last error 中文', file=sys.stderr); sys.exit(24)")
         self.assertIn("last error 中文", message)
         self.assertIn("truncated", message)
         self.assertLess(len(message), 18000)
@@ -54,26 +64,23 @@ sys.stdout.buffer.write(b'HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websock
 sys.stderr.write('proxy ended before initialize response\\n');sys.stderr.flush()
 sys.exit(25)
 """
-        message = self.call(code)
+        message = self.submit_with_proxy(code)
         self.assertIn("proxy ended before initialize response", message)
         self.assertRegex(message, r"proxy exit status:.*25")
 
     def test_failed_connection_never_runs_the_requested_command(self):
-        with tempfile.TemporaryDirectory(prefix="terminalhook proxy failure ") as directory:
-            marker = Path(directory) / "must-not-run"
-            with patch.dict(os.environ, {"TERMINALHOOK_TASK_DIR": str(Path(directory) / "tasks")}):
-                message = self.call("import sys; print('host endpoint unavailable',file=sys.stderr); sys.exit(26)", "submit_task", {
-                    "task_key": "no-host", "program": sys.executable,
-                    "args": ["-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"], "cwd": directory,
-                })
-            self.assertIn("host endpoint unavailable", message)
-            self.assertFalse(marker.exists())
-            self.assertEqual(list(Path(directory).rglob("request.json")), [])
+        marker = self.directory / "must-not-run"
+        message = self.submit_with_proxy(
+            "import sys; print('host endpoint unavailable',file=sys.stderr); sys.exit(26)",
+            f"from pathlib import Path; Path({str(marker)!r}).touch()",
+        )
+        self.assertIn("host endpoint unavailable", message)
+        self.assertFalse(marker.exists())
+        self.assertEqual(list(self.directory.rglob("request.json")), [])
 
     def test_proxy_descendants_are_cleaned_after_handshake_failure(self):
-        with tempfile.TemporaryDirectory(prefix="terminalhook proxy tree ") as directory:
-            marker = Path(directory) / "child-pid"
-            code = f"""
+        marker = self.directory / "child-pid"
+        code = f"""
 import subprocess,sys
 from pathlib import Path
 child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'])
@@ -82,8 +89,8 @@ print('proxy protocol failure',file=sys.stderr,flush=True)
 print('invalid HTTP upgrade',flush=True)
 sys.exit(27)
 """
-            self.assertIn("proxy protocol failure", self.call(code))
-            self.assertTrue(wait_for_exit(int(marker.read_text())))
+        self.assertIn("proxy protocol failure", self.submit_with_proxy(code))
+        self.assertTrue(wait_for_exit(int(marker.read_text())))
 
 
 if __name__ == "__main__":

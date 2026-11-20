@@ -119,7 +119,7 @@ class McpContractTests(unittest.TestCase):
         self.client.send("tools/list", {}, 2)
         tools = self.client.receive()["result"]["tools"]
         self.assertEqual({tool["name"] for tool in tools}, {
-            "check_background", "submit_task", "list_tasks", "get_task",
+            "submit_task", "list_tasks", "get_task",
             "cancel_task", "retry_delivery", "watch_tasks"})
         watch = next(tool for tool in tools if tool["name"] == "watch_tasks")
         self.assertEqual(watch["_meta"]["ui"]["visibility"], ["app"])
@@ -150,6 +150,11 @@ class McpContractTests(unittest.TestCase):
             response = self.client.receive()
             self.assertIn("error", response, name)
             self.assertIn("Unknown tool", response["error"]["message"])
+
+    def test_removed_background_check_cannot_be_called(self):
+        self.client.send("tools/call", {"name": "check_background", "arguments": {},
+                                        "_meta": {"threadId": "01a1e361-731f-7020-8ba1-5fb700728b78"}}, 2)
+        self.assertIn("Unknown tool", self.client.receive()["error"]["message"])
 
     def test_ping_and_dashboard_resource_work_without_a_background_host(self):
         self.client.send("ping", {}, 2)

@@ -232,13 +232,12 @@ class BackgroundTests(unittest.TestCase):
 
     def test_successful_proxy_continuously_drains_large_stderr(self):
         code = "import sys,runpy; sys.stderr.buffer.write(b'x'*200000); sys.stderr.flush(); runpy.run_path(sys.argv[1],run_name='__main__')"
+        self.client.close()
         with patch.dict(os.environ, {"TERMINALHOOK_PROXY_COMMAND": json.dumps([sys.executable, "-u", "-c", code, str(ROOT / "tests/fake_codex_proxy.py")])}):
-            client = Client()
-        try:
-            client.send("tools/call", {"name": "check_background", "arguments": {}, "_meta": {"threadId": OWNER}}, 10)
-            self.assertEqual(client.result(25)["status"], "ready")
-        finally:
-            client.close()
+            self.client = Client()
+        job = self.submit()
+        state = self.await_state(job, lambda state: state["delivery"] == "delivered")
+        self.assertEqual(state["result"]["exit_code"], 0)
 
     @unittest.skipUnless(os.name == "nt", "Windows MCP Job Object containment")
     def test_host_launch_survives_strict_mcp_job_termination(self):

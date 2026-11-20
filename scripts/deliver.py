@@ -282,7 +282,7 @@ def follow(hub, number, head, timeout=3600, merge=False, pause=time.sleep, now=t
             result = merge_if_ready(hub, number, head, branch, ci)
             if result:
                 return result
-        pause(min(15, max(0, deadline - now())))
+        pause(min(60, max(0, deadline - now())))
     raise TimeoutError(f"Timed out; retain PR #{number} and resume follow for HEAD {head}")
 
 
