@@ -197,31 +197,8 @@ dd {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.output-terminal {
-  --foreground: #dce8ed;
-  --muted-foreground: #b6c9ce;
-  --destructive: #ff9b9b;
-  --scrollbar-thumb: #59737d;
-  --ring: #83d7bd;
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid #2d3b43;
-  border-radius: var(--radius);
-  background: #10171d;
-}
-.output-trigger {
-  background: #1a252c;
-}
-.output-trigger[aria-expanded="true"] {
-  border-radius: 0;
-  border-bottom: 1px solid #2d3b43;
-}
-.output-trigger:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
-}
-.output-trigger [data-slot="trace-line"]:not([data-status="error"]) > [data-slot="trace-icon"] {
-  color: var(--ring);
+.task-terminal {
+  --scrollbar-thumb: color-mix(in srgb, var(--muted-foreground) 70%, var(--muted));
 }
 .original-chat {
   line-height: 1.6;

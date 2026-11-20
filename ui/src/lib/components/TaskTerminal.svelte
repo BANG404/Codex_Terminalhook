@@ -21,23 +21,23 @@
   });
 </script>
 
-<Trace.Root class="output-terminal">
+<Trace.Root class="task-terminal mt-3 max-w-xl">
   <Trace.Collapsible open>
-    <Trace.CollapsibleTrigger class="output-trigger w-full justify-between px-3 py-1.5">
+    <Trace.CollapsibleTrigger class="py-0.5 [&>[data-slot=trace-icon]]:size-3 [&>[data-slot=trace-icon]>svg]:size-3">
       <Trace.Line
-        class="gap-1.5 font-mono text-xs"
+        class="gap-1.5 text-xs"
         status={failed ? "error" : task.status === "running" ? "running" : undefined}
       >
-        <Trace.Icon class="size-3.5"><Terminal class="size-3.5" /></Trace.Icon>
+        <Trace.Icon class="size-3.5"><Terminal class="size-3" /></Trace.Icon>
         <Trace.Title title={title}>{title}</Trace.Title>
       </Trace.Line>
     </Trace.CollapsibleTrigger>
-    <Trace.CollapsibleContent class="m-0 border-0 p-0">
-      <CodeBlock.Root size="sm" class="rounded-none border-0 dark:bg-transparent">
+    <Trace.CollapsibleContent class="mt-1.5 pr-0 pl-3.5">
+      <CodeBlock.Root size="sm" class="rounded-xl border-0 bg-muted dark:bg-muted">
         <CodeBlock.Content
           code={commandOutput || (detailBusy ? t.loading : t.nooutput)}
           label={t.output}
-          class={cn("max-h-30", !commandOutput && "text-muted-foreground")}
+          class={cn("max-h-38 text-[11px] sm:max-h-44", !commandOutput && "text-muted-foreground")}
         />
       </CodeBlock.Root>
     </Trace.CollapsibleContent>
