@@ -145,8 +145,8 @@ Actions 固定到提交 SHA。
 
 ### 测试分层与门禁
 
-协议套件覆盖黑盒、边界、集成及权限隔离检查。CI 和 Assurance 共用安全工作流。
-Release 调用可复用的 Assurance，运行安全、覆盖率、变异和性能检查。
+协议套件覆盖黑盒、边界、集成及权限隔离检查。CI、Assurance 和 Release 共用安全工作流。
+Alpha Release 调用可复用的 Assurance，运行覆盖率、变异和性能检查。
 任何必需验证失败都将阻止发布。
 
 仪表盘构建依赖暂时固定使用 `@ryotsu/picomatch@4.0.7-a` 的 CVE-2026-112366 回移修复。
@@ -154,11 +154,11 @@ Release 调用可复用的 Assurance，运行安全、覆盖率、变异和性�
 
 | 层次 | 执行时机 | 门禁 |
 | --- | --- | --- |
-| 边界与白盒 | Alpha CI 和 Release 跑 Rust 单元测试。定时或手动 Assurance 和 Release 测量覆盖率 | 全部测试通过。覆盖率任务要求 `spec.rs` 和 `matcher.rs` 的 LLVM 行覆盖率分别达到 90% |
+| 边界与白盒 | Alpha CI 和 alpha Release 跑 Rust 单元测试。定时或手动 Assurance 和 alpha Release 测量覆盖率 | 全部测试通过。覆盖率任务要求 `spec.rs` 和 `matcher.rs` 的 LLVM 行覆盖率分别达到 90% |
 | 黑盒与集成 | Release 在五个平台验证 | stdio MCP、子进程清理、后台桥接及打包、安装、升级场景通过 |
 | 浏览器 E2E | Release 在 Linux x64 验证 | 对最终包运行真实 MCP 仪表盘场景并通过 |
-| 静态分析与依赖安全 | Alpha CI 和 Release 跑 Clippy。每次 PR、Assurance 和 Release 执行依赖及脚本扫描 | Clippy 零警告。Bandit 的 B602/B604/B605/B609 规则通过。Cargo 和 npm 审计满足各自门槛，覆盖 npm 构建依赖 |
-| 变异测试 | 每周、手动 Assurance 开启 `deep`、Release 验证 | `validate_run` / `validate_deadline` 的所有可编译变异均被测试捕获；存活变异、超时、基线失败均阻止通过 |
+| 静态分析与依赖安全 | Alpha CI 和 alpha Release 跑 Clippy。每次 PR、Assurance 和 Release 执行依赖及脚本扫描 | Clippy 零警告。Bandit 的 B602/B604/B605/B609 规则通过。Cargo 和 npm 审计满足各自门槛，覆盖 npm 构建依赖 |
+| 变异测试 | 每周、手动 Assurance 开启 `deep`、alpha Release | `validate_run` / `validate_deadline` 的所有可编译变异均被测试捕获。存活变异、超时和基线失败均阻止通过 |
 | 性能 | 与变异验证一起在 Linux x64 执行 | 20 次真实后台 worker 完成并向 loopback 宿主交付，各输出 64 KiB、匹配窗口 64 KiB；最近秩法 p95 不超过 3 秒 |
 
 覆盖率门禁逐文件检查原始计数；缺失、重复、无效或未达标证据均失败。
@@ -233,10 +233,10 @@ GitHub Actions 选择 **Release**，指定工作流分支及匹配渠道（`prod
 **publish** 关闭时仅验证，不改变发布版和 marketplace 引用；启用后发布完整原生产物集。
 四个阶段共用同一套五目标矩阵。
 
-可复用的发布验证工作流检查分支和 alpha 源码证据。Beta、rc 和 main 上的 Release 运行还要求
-同一源码树已完成 alpha 发布。通过这些检查后，工作流共享一次仪表盘构建，随后执行原生测试、
-Assurance 和各目标的渠道打包。任务会校验共享仪表盘的源码提交和 HTML 校验和。
-打包与原生测试并行运行。
+可复用的发布验证工作流检查分支和 alpha 源码证据。Alpha Release 检查 Rust 格式，在各平台运行
+Clippy 和单元测试，并通过 Assurance 检查覆盖率、变异和性能。原生测试与打包并行运行。
+Beta、rc 和 main 要求同一源码树已完成 alpha 发布，以复用这些验证结果。每个渠道都重新扫描依赖与脚本、
+构建一份共享的仪表盘，并构建和测试本渠道的原生安装包。任务会校验共享仪表盘的源码提交和 HTML 校验和。
 
 | 目标 | 原生 runner | 二进制 |
 | --- | --- | --- |
@@ -251,7 +251,7 @@ Assurance 和各目标的渠道打包。任务会校验共享仪表盘的源码�
 断连和 90 秒 UTF-8 输出。Windows 额外检查 PowerShell UTF-8 后台长任务。ZIP 与 Git 树保留可执行权限。
 Linux 包使用 Ubuntu 24.04 的 glibc。macOS 包以未签名、未经公证的形式分发。
 
-汇总任务要求原生测试和 Assurance 通过，再核验源码身份、校验和、原生启动配置、二进制格式和可执行权限。
+汇总任务要求质量门禁和全部原生打包任务通过，再核验源码身份、校验和、原生启动配置、二进制格式和可执行权限。
 发布版包含五份 `terminalhook-<platform>.zip`、覆盖五份归档的单个 `SHA256SUMS.txt`，
 以及共享 `build-info.json`。写权限任务创建带注释的 `v<version>` 标签。非生产渠道是预发布版。
 重跑可补完未完成草稿，但不能替换资源、修改标签指向，或将同一稳定版本用于不同源码。

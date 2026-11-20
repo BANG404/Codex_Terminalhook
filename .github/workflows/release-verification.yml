@@ -46,6 +46,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Check Rust formatting
+        if: github.ref == 'refs/heads/alpha'
         run: cargo fmt --check
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -64,6 +65,7 @@ jobs:
   test:
     name: Native tests (${{ matrix.platform }})
     needs: [policy, frontend]
+    if: github.ref == 'refs/heads/alpha'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(inputs.matrix) }}
@@ -103,6 +105,7 @@ jobs:
 
   assurance:
     needs: frontend
+    if: github.ref == 'refs/heads/alpha'
     uses: ./.github/workflows/assurance.yml
     with:
       skip_security: true
@@ -122,14 +125,16 @@ jobs:
       FRONTEND: ${{ needs.frontend.result }}
       TEST: ${{ needs.test.result }}
       ASSURANCE: ${{ needs.assurance.result }}
+      EXPECTED_SOURCE_CHECKS: ${{ github.ref == 'refs/heads/alpha' && 'success' || 'skipped' }}
     steps:
-      - name: Require source proof, security, shared bundle and full native tests
+      # On later stages, policy also verifies a completed alpha publication for this exact tree.
+      - name: Require fresh alpha checks or verified promotion evidence
         run: |
           test "$POLICY" = success
           test "$SECURITY" = success
           test "$FRONTEND" = success
-          test "$TEST" = success
-          test "$ASSURANCE" = success
+          test "$TEST" = "$EXPECTED_SOURCE_CHECKS"
+          test "$ASSURANCE" = "$EXPECTED_SOURCE_CHECKS"
 
   build:
     name: Native package (${{ matrix.platform }})
