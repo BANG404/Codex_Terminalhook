@@ -18,7 +18,7 @@ CI 会拒绝跳过阶段以及来自 fork 的提升。仓库初始快照以相�
 普通发布无需修改这些文件；显式调整最低版本时须同步修改三者。
 目标版本和渠道后缀在打包时生成，不修改受版本控制的文件。
 二进制的 `--version`、MCP 服务标识、包内清单和 `build-info.json` 保持一致。
-CI 会拒绝工作区不干净、源码 SHA 不匹配或渠道与分支不匹配的构建。
+Release 会拒绝工作区不干净、源码 SHA 不匹配或渠道与分支不匹配的构建。
 
 ## 自动计算目标版本
 
@@ -81,14 +81,17 @@ PR 描述文件应放在跟踪文件之外（例如被忽略的 `artifacts/` 目
 App 15368，均对应预期来源 HEAD、同一次最新 `ci.yml` PR 运行及其最新尝试。
 脚本核对对应真实 job，在合并前再次读取 PR 身份及检查，再提交绑定 SHA 的
 `merge_method=merge` 请求，最后验证实际提交有两个父提交且第二个是指定来源。
-不使用 GitHub 原生 Auto-merge，目标 PR 也不能已经启用该功能。
+仓库启用 **Allow auto-merge** 后，符合条件的 PR 可选择 **Enable auto-merge**。
+授权维护者在 PR 上启用后，GitHub 等待分支要求满足。选择 **Merge commit**，
+以保留 alpha 交付要求的两个父提交。交付脚本跟随该合并，并核对实际合并结果和原始 HEAD 的 CI 证据。
 
 alpha 正常前进不会改变已验证的 PR HEAD，也不要求为此新增源码提交。
 参考 sandboxpi 的 [源码检查策略](https://github.com/BANG404/sandboxpi/blob/alpha/.agents/skills/git-delivery/references/alpha-pr.md)，
-脚本从已核实的 CI 运行下载现有 `package-verification` 报告，核对其中实际测试的
-合并候选：第二个父提交必须是当前 PR HEAD，源码树必须与报告相同。
+脚本从已核实的 CI 运行下载 `source-validation` 报告。流水线拆分前已验证的 PR
+可以使用原有打包报告。脚本核对实际测试的合并候选，要求第二个父提交是当前 PR HEAD，
+且源码树与报告相同。
 第一个父提交为测试时的 base，可以落后于当前 alpha，但必须仍是当前 alpha 的祖先。
-包验证证据缺失、候选身份不符或 alpha 历史被改写时停止合并。
+源码验证证据缺失、候选身份不符或 alpha 历史被改写时停止合并。
 这证明保存的候选已通过验证，不代表最新 alpha 与 PR 的组合已经测试。
 
 仍须满足审阅要求及分支保护。按源码交付的 alpha 策略采用非严格必需检查
@@ -109,8 +112,8 @@ PR 未合并便关闭时停止。修复冲突或修改源码后，必须重新�
 python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 ```
 
-省略 `--merge` 时只观察。网络/服务端暂时读取失败会有限重试；写入不会盲目重试，
-创建 PR 或合并响应不明确时读取实际 PR 核实。默认跟随期限一小时，可用
+省略 `--merge` 时在 CI 验证通过后返回。暂时的网络或服务端读取失败会有限重试。
+创建 PR 或合并响应不明确时，先核实实际 PR。默认跟随期限一小时，可用
 `--timeout` 指定秒数。残留锁须先核实再删除。运行针对性回归测试：
 `python -m unittest discover -s tests -p test_delivery.py -v`。
 
@@ -125,57 +128,35 @@ python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 
 ## CI
 
-Alpha PR 在五个原生目标执行格式检查、Clippy、Rust 单元测试、Python 协议与发布策略测试，
-同时执行原生打包和安装验收：
+Alpha PR 在 Linux x64 上验证源码，包括仪表盘类型和构建、格式检查、Clippy、
+Rust 单元测试，以及 Python 交付和发布策略测试。可复用的安全工作流扫描依赖和脚本。
+晋级 PR 核对阶段顺序，确认源码树已通过 alpha 验证，并执行新的安全扫描。
 
-| 目标 | 原生 runner | 二进制 |
-| --- | --- | --- |
-| windows-x64 | windows-2025 | terminalhook.exe |
-| linux-x64 | ubuntu-24.04 | terminalhook |
-| linux-arm64 | ubuntu-24.04-arm | terminalhook |
-| macos-x64 | macos-15-intel | terminalhook |
-| macos-arm64 | macos-15 | terminalhook |
+分支保护要求 **Quality checks** 和 **Package verification**。第二个名称对应 CI 的证据门禁。
+它在 alpha 生成 `source-validation`，记录实际测试的合并候选、Git 树、运行 ID 和尝试编号，
+并在晋级 PR 上校验复用的证据。前置任务失败、取消或意外跳过时，门禁失败。
+五平台打包流程由 CD 执行，生成 `package-verification` 和 `release-distributions`。
 
-一个 Linux 任务先审计锁定的前端依赖，再安装、检查类型并构建仪表盘。审计失败会阻止原生矩阵启动。
-安全任务仍在每次 assurance 运行中生成新的审计报告。
-原生测试、打包和 assurance 任务复用同一次运行的 `dashboard-bundle` 产物，
-嵌入前核验源码提交和 HTML 校验和。前端产物就绪后，原生测试与打包同时开始。
-`Quality checks` 仍要求全部测试和 assurance 检查通过；`Package verification`
-等待质量检查与全部原生包完成后才汇总分发产物。即使打包成功，测试失败或取消也不能
-授权交付或发布。并行构建缩短等待时间，但测试失败时可能产生额外构建开销。
-
-独立运行 Assurance 时自行构建仪表盘。仅做阶段提升的 PR 跳过前端和原生构建，
-仍要求源码证据与安全检查通过。
-
-每个二进制均从路径含空格的解压目录运行测试，验证隔离安装、配置保留、Git 迁移和失败恢复、
-启动自动更新、显式升级及缓存中的实际 MCP 启动命令。ZIP 与 Git 树保留可执行权限。
-Linux 使用基于 Ubuntu 24.04 构建的 glibc；Alpine/musl 和 Windows ARM64 不在发布矩阵内。
-macOS 二进制未签名，也未公证。
-
-分支必需检查保持为 **Quality checks** 和 **Package verification**。两者汇总所有原生结果，
-任一任务失败、取消或意外跳过均不能通过。只有完整的五平台归档和安装证据才能生成
-`release-distributions` 及汇总 `package-verification` 报告。
 PR 自动验证只在创建 PR（`opened`）或源分支提交变化（`synchronize`）时运行。
 修改标题或说明、重新打开 PR、将草稿标记为可审阅，都不会启动或取消 CI。
-新的源码提交会取消过时运行。分支 push 不单独运行另一套 CI；显式手动运行和可复用工作流调用仍然保留。
+新的源码提交会取消过时运行。可在 `alpha` 分支手动运行 **CI**，刷新该分支当前源码树的证据。
 Actions 固定到提交 SHA。
 
 ### 测试分层与门禁
 
-测试类型存在重叠：协议套件同时提供黑盒、边界、集成及权限/隔离检查，
-不会将同一套件复制为多个测试任务。可复用的 `assurance.yml` 工作流计入
-**Quality checks**；失败或取消将阻止最终产物汇总与交付。阶段提升 PR 重新执行安全扫描，
-原生测试则复用与当前源码树完全一致的 alpha 证据。
+协议套件覆盖黑盒、边界、集成及权限隔离检查。CI 和 Assurance 共用安全工作流。
+Release 调用可复用的 Assurance，运行安全、覆盖率、变异和性能检查。
+任何必需验证失败都将阻止发布。
 
 仪表盘构建依赖暂时固定使用 `@ryotsu/picomatch@4.0.7-a` 的 CVE-2026-112366 回移修复。
 上游发布修复版本且审计通过后，移除该覆盖项。
 
 | 层次 | 执行时机 | 门禁 |
 | --- | --- | --- |
-| 边界与白盒 | 每次 alpha PR：Rust 单元测试，覆盖后台输入上下界及输出流选择 | 全部测试通过；`spec.rs`、`matcher.rs` 各自 LLVM 行覆盖率至少 90% |
-| 黑盒与集成 | 每次 alpha PR：五平台 stdio MCP、子进程清理、后台桥接、打包/安装/升级测试 | 核心协议及安装场景全部通过 |
-| 浏览器 E2E | 每次 alpha PR 的 Linux x64；Release 发布前再次测试最终包内程序 | 真实 MCP 仪表盘场景通过 |
-| 静态分析与依赖安全 | 每次 PR、Release 验证及每日定时扫描 | Clippy 零警告；Bandit 的 B602/B604/B605/B609 Shell 注入规则通过；Cargo audit 无已知漏洞；npm audit 无高危/严重问题，包含开发依赖 |
+| 边界与白盒 | Alpha CI 和 Release 跑 Rust 单元测试。定时或手动 Assurance 和 Release 测量覆盖率 | 全部测试通过。覆盖率任务要求 `spec.rs` 和 `matcher.rs` 的 LLVM 行覆盖率分别达到 90% |
+| 黑盒与集成 | Release 在五个平台验证 | stdio MCP、子进程清理、后台桥接及打包、安装、升级场景通过 |
+| 浏览器 E2E | Release 在 Linux x64 验证 | 对最终包运行真实 MCP 仪表盘场景并通过 |
+| 静态分析与依赖安全 | Alpha CI 和 Release 跑 Clippy。每次 PR、Assurance 和 Release 执行依赖及脚本扫描 | Clippy 零警告。Bandit 的 B602/B604/B605/B609 规则通过。Cargo 和 npm 审计满足各自门槛，覆盖 npm 构建依赖 |
 | 变异测试 | 每周、手动 Assurance 开启 `deep`、Release 验证 | `validate_run` / `validate_deadline` 的所有可编译变异均被测试捕获；存活变异、超时、基线失败均阻止通过 |
 | 性能 | 与变异验证一起在 Linux x64 执行 | 20 次真实后台 worker 完成并向 loopback 宿主交付，各输出 64 KiB、匹配窗口 64 KiB；最近秩法 p95 不超过 3 秒 |
 
@@ -190,8 +171,7 @@ Actions 固定到提交 SHA。
 Assurance 每日 UTC 02:17（北京时间 10:17）运行安全扫描，每周一 UTC 02:47
 （北京时间 10:47）运行安全、覆盖率、变异和性能检查。GitHub 定时任务仅从仓库默认分支执行，
 需先通过正常阶段流程将该工作流提升到默认分支。在此之前，可选择 `alpha` 分支手动运行
-**Assurance** 或执行本地命令；alpha PR 和 Release 门禁已直接调用可复用工作流。
-定时运行不会发布或提升源码。
+**Assurance** 或执行本地命令。定时任务独立于发布和晋级，按计划执行相应的检查。
 
 原生任务固定 Node 24，并缓存 npm 下载及 Rust 依赖/编译结果。
 Rust 缓存键区分操作系统、架构、任务、工具链、锁文件及源码提交；恢复前缀复用旧依赖，
@@ -223,10 +203,10 @@ python3 scripts/verify_performance.py
 请使用独立任务 checkout：变异命令会临时修改校验器，测试结束后恢复。
 Linux 性能探针默认使用 debug 程序，可通过 `TERMINALHOOK_EXE` 指定其他原生程序。
 
-Beta、rc、main 提升 PR 使用轻量 Linux 任务，强制阶段顺序、要求合并树等于来源树，
-并查找验证过完全相同源码树的成功 alpha CI。每个平台的产物、校验和及源码身份必须存在且未过期；
-证据缺失或不匹配都会阻止提升。提升期间不编译项目 Rust 源码、不重跑协议、不重新标记二进制。
-`promotion-validation.json` 保留原验证证据。工作流和测试属于源码树，修改后必须重新验证 alpha。
+Beta、rc、main 晋级 PR 使用轻量 Linux 任务，检查阶段顺序并要求合并树等于来源树，
+再查找验证过完全相同源码树的成功 alpha CI。该次运行的源码报告必须可用且未过期。
+`promotion-validation.json` 记录原验证运行和源码树。证据过期且对应源码树仍位于 alpha 时，
+可在 alpha 手动运行 **CI** 刷新。工作流和测试属于源码树，修改后必须重新验证 alpha。
 
 源码提交排除编译后二进制、运行日志、本地聊天轨迹和凭据；仅 Release 会向独立 marketplace 分支写入二进制。
 
@@ -249,11 +229,24 @@ GitHub Actions 选择 **Release**，指定工作流分支及匹配渠道（`prod
 **publish** 关闭时仅验证，不改变发布版和 marketplace 引用；启用后发布完整原生产物集。
 四个阶段共用同一套五目标矩阵。
 
-工作流检查分支、复用完整 alpha 源码验证，为每个目标构建一次最终渠道版本。每个包内二进制均通过
-协议、安装、Git 更新、65 秒后台任务跨越 MCP 断连及 90 秒 UTF-8 输出回归。Windows 额外执行
-PowerShell UTF-8 后台长任务回归。阶段提升不会将 alpha 二进制重新标记为稳定版。
+可复用的发布验证工作流检查分支和 alpha 源码证据，共享一次仪表盘构建，随后执行原生测试、
+Assurance 和各目标的渠道打包。任务会校验共享仪表盘的源码提交和 HTML 校验和。
+打包与原生测试并行运行。
 
-发布前汇总核验全部源码身份、校验和、原生启动配置、二进制格式和可执行权限。
+| 目标 | 原生 runner | 二进制 |
+| --- | --- | --- |
+| windows-x64 | windows-2025 | terminalhook.exe |
+| linux-x64 | ubuntu-24.04 | terminalhook |
+| linux-arm64 | ubuntu-24.04-arm | terminalhook |
+| macos-x64 | macos-15-intel | terminalhook |
+| macos-arm64 | macos-15 | terminalhook |
+
+每个包内二进制都在路径含空格的解压目录中测试，覆盖协议、隔离安装、配置保留、Git 迁移及回滚、
+启动自动更新、显式升级及缓存中的实际 MCP 启动命令。长等待用例覆盖 65 秒后台任务跨越 MCP
+断连和 90 秒 UTF-8 输出。Windows 额外检查 PowerShell UTF-8 后台长任务。ZIP 与 Git 树保留可执行权限。
+Linux 包使用 Ubuntu 24.04 的 glibc。macOS 包以未签名、未经公证的形式分发。
+
+汇总任务要求原生测试和 Assurance 通过，再核验源码身份、校验和、原生启动配置、二进制格式和可执行权限。
 发布版包含五份 `terminalhook-<platform>.zip`、覆盖五份归档的单个 `SHA256SUMS.txt`，
 以及共享 `build-info.json`。写权限任务创建带注释的 `v<version>` 标签。非生产渠道是预发布版。
 重跑可补完未完成草稿，但不能替换资源、修改标签指向，或将同一稳定版本用于不同源码。
@@ -283,7 +276,7 @@ marketplace 发布中途失败时保留不可变 Release 和已完成平台引�
 相同平台跳过，不能覆盖更新的 HEAD。
 
 启动刷新及安装缓存更新由 Codex 负责，没有自建更新守护进程或生命周期 Hook。
-CI 固定 Codex CLI 0.167.0，在每个目标上通过回环 Git 服务验证本地迁移、错误引用恢复、app-server
+发布验证固定 Codex CLI 0.167.0，在每个目标上通过回环 Git 服务验证本地迁移、错误引用恢复、app-server
 启动自动更新、官方升级命令和实际缓存 MCP 命令。使用隔离 Codex 目录，不创建模型轮次；
 不能以此证明桌面模型请求数，也不承诺热迁移活跃 MCP 会话。
 
@@ -292,10 +285,10 @@ CI 固定 Codex CLI 0.167.0，在每个目标上通过回环 Git 服务验证本
 
 ## 任务面板验证
 
-Alpha 的 Linux x64 测试任务还会使用 Playwright，连接真实 TerminalHook stdio 服务
+Release 的 Linux x64 测试任务使用 Playwright，连接真实 TerminalHook stdio 服务
 与确定性宿主夹具，验证内嵌 MCP Apps 资源、任务工具、无需列表读取的单任务隔离、
 纯英文控件、回调更新、空闲与可见性切换不轮询、回调不产生循环、紧凑响应式布局、宿主主题、输出转义，
-以及无外部请求、无界面模型消息。这些检查纳入 `Quality checks`；
+以及无外部请求、无界面模型消息。这些检查纳入发布验证；
 桌面宿主原生渲染仍需单独集成验证。源码构建需要带 npm 的 Node.js 20.19+ 或 22.12+；
 Playwright 仅用于验证。安装后的 MCP 二进制均不需要。运行 Cargo 前先构建独立的 Svelte/Tailwind 资源：
 
@@ -308,7 +301,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-截图和证据写入已忽略的 `artifacts/`，并由 CI 上传。
+截图和证据写入已忽略的 `artifacts/`，并由发布验证上传。
 后台执行与宿主交付回归纳入所有原生平台的 Python 协议测试。
 参见[后台任务指南](background-tasks.zh-CN.md)。
 
@@ -318,7 +311,7 @@ npm run test:ui
 Cargo 将该文件嵌入二进制，修改界面后应先重新打包，再编译 Rust。
 打包脚本会自动执行 `npm ci`、类型检查和界面构建。安装后无需 CDN 或前端运行时。
 
-CI 下载共享前端产物后，显式向 `scripts/package.py` 传入 `--prebuilt-dashboard`。
+发布工作流下载共享前端产物后，向 `scripts/package.py` 传入 `--prebuilt-dashboard`。
 该选项要求 `ui/dist/index.html` 及其 `build-info.json` 清单与当前源码提交和校验和一致；
 缺失或不匹配时，在 Rust 编译前失败。本地打包默认仍安装依赖、检查类型并重新构建前端。
 需要显式创建和验证可复用产物时，运行 `python3 scripts/dashboard.py build`

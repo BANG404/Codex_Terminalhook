@@ -57,8 +57,8 @@ class FakeGitHub:
             return {"merged": True, "sha": MERGE}
         if path == "pulls/11":
             return deepcopy(self.pr)
-        if path == "actions/runs/50":
-            return deepcopy(self.run)
+        if path.startswith("actions/runs/"):
+            return deepcopy(next(run for run in self.runs if run["id"] == int(path.split("/")[2])))
         if path == "git/commits/" + MERGE:
             return {"parents": deepcopy(self.parents)}
         if path == "git/commits/" + TESTED:
@@ -73,26 +73,68 @@ class FakeGitHub:
             return deepcopy(self.checks)
         if path.startswith("actions/workflows/"):
             return deepcopy(self.runs)
-        if path == "actions/runs/50/attempts/2/jobs?per_page=100":
-            return deepcopy(self.jobs)
+        if path.startswith("actions/runs/"):
+            return deepcopy(self.jobs) if path.split("/")[2] == "50" else []
         raise AssertionError("Unexpected GitHub listing " + path)
 
     def reviews(self, _number):
         return self.decision
 
-    def package_report(self, run_id):
-        if run_id != 50:
+    def source_report(self, run_id, attempt):
+        if (run_id, attempt) != (50, self.run["run_attempt"]):
             raise AssertionError("Unexpected CI proof run")
         return deepcopy(self.report)
 
 
+class SourceReportTests(unittest.TestCase):
+    def report(self, artifacts, payload):
+        hub = delivery.GitHub()
+
+        def download(*args):
+            self.assertEqual(args[:5], ("run", "download", "50", "--repo", REPO))
+            name = args[args.index("--name") + 1]
+            filename = "source-validation.json" if name == "source-validation" else "package-validation.json"
+            (Path(args[args.index("--dir") + 1]) / filename).write_text(payload, encoding="utf-8")
+
+        return hub, patch.object(hub, "pages", return_value=artifacts), patch.object(hub, "gh", side_effect=download)
+
+    def test_reads_current_attempt_source_report_or_legacy_report_if_absent(self):
+        report = {"passed": True, "source_revision": TESTED, "source_tree": TREE}
+        for artifact in ("source-validation", "package-verification"):
+            modern = artifact == "source-validation"
+            artifacts = [{"name": artifact, "expired": False}] if modern else []
+            payload = dict(report, run_id=50, run_attempt=2) if modern else report
+            hub, listing, download = self.report(artifacts, json.dumps(payload))
+            with self.subTest(artifact=artifact), listing, download as gh:
+                self.assertEqual(hub.source_report(50, 2), payload)
+                self.assertEqual(gh.call_args.args[6], artifact)
+
+    def test_corrupt_or_stale_source_report_never_falls_back(self):
+        for payload in ("[", "[]", '{"run_id": 50, "run_attempt": 1}', '{"run_id": 49, "run_attempt": 2}'):
+            hub, listing, download = self.report([{"name": "source-validation", "expired": False}], payload)
+            with self.subTest(payload=payload), listing, download as gh:
+                with self.assertRaises(ValueError):
+                    hub.source_report(50, 2)
+                self.assertEqual(gh.call_count, 1)
+                self.assertEqual(gh.call_args.args[6], "source-validation")
+
+    def test_expired_or_ambiguous_source_report_never_falls_back(self):
+        for artifacts in ([{"name": "source-validation", "expired": True}],
+                          [{"name": "source-validation", "expired": False}] * 2):
+            hub, listing, download = self.report(artifacts, "")
+            with self.subTest(artifacts=artifacts), listing, download as gh:
+                with self.assertRaisesRegex(ValueError, "ambiguous or expired"):
+                    hub.source_report(50, 2)
+                gh.assert_not_called()
+
+
 class DeliveryGateTests(unittest.TestCase):
-    def follow(self, hub, **kwargs):
+    def follow(self, hub, timeout=1, **kwargs):
         clock = [0]
         def pause(seconds):
-            clock[0] += seconds
+            clock[0] += min(seconds, 1)
         with redirect_stdout(io.StringIO()):
-            return delivery.follow(hub, 11, HEAD, timeout=1, now=lambda: clock[0], pause=pause, **kwargs)
+            return delivery.follow(hub, 11, HEAD, timeout=timeout, now=lambda: clock[0], pause=pause, **kwargs)
 
     def test_merges_only_after_actual_jobs_and_proves_two_parents(self):
         hub = FakeGitHub()
@@ -118,6 +160,7 @@ class DeliveryGateTests(unittest.TestCase):
                 hub = FakeGitHub()
                 check = dict(hub.checks[0], id=99, status="queued" if state == "queued" else "completed", conclusion=state)
                 hub.checks.append(check)
+                hub.jobs[0]["check_run_url"] = f"https://api.github.com/repos/{REPO}/check-runs/99"
                 with self.assertRaises(TimeoutError if state == "queued" else ValueError):
                     self.follow(hub, merge=True)
                 self.assertEqual(hub.writes, [])
@@ -136,6 +179,19 @@ class DeliveryGateTests(unittest.TestCase):
                     self.follow(hub, merge=True)
                 self.assertEqual(hub.writes, [])
 
+    def test_new_attempt_after_source_proof_requires_reverification(self):
+        hub = FakeGitHub()
+        source_report = hub.source_report
+
+        def proof(*args):
+            report = source_report(*args)
+            hub.run["run_attempt"] = 3
+            return report
+
+        with patch.object(hub, "source_report", side_effect=proof), self.assertRaises(TimeoutError):
+            self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
+
     def test_wrong_workflow_or_event_cannot_authorize_merge(self):
         for change in ({"event": "workflow_dispatch"}, {"path": ".github/workflows/fake.yml"}):
             hub = FakeGitHub()
@@ -145,7 +201,7 @@ class DeliveryGateTests(unittest.TestCase):
             self.assertEqual(hub.writes, [])
 
     def test_identity_change_conflicts_reviews_and_protections(self):
-        for change in ("head", "base", "fork", "draft", "closed", "conflict", "native", "review", "behind"):
+        for change in ("head", "base", "fork", "draft", "closed", "conflict", "review", "behind"):
             hub = FakeGitHub()
             if change == "head":
                 hub.pr["head"]["sha"] = BASE
@@ -157,7 +213,7 @@ class DeliveryGateTests(unittest.TestCase):
                 hub.decision = "CHANGES_REQUESTED"
             else:
                 hub.pr.update({"draft": {"draft": True}, "closed": {"state": "closed"},
-                               "conflict": {"mergeable": False}, "native": {"auto_merge": {"enabled": True}},
+                               "conflict": {"mergeable": False},
                                "behind": {"mergeable_state": "behind"}}[change])
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.follow(hub, merge=True)
@@ -178,13 +234,86 @@ class DeliveryGateTests(unittest.TestCase):
             self.follow(hub, merge=True)
         self.assertEqual(hub.writes, [])
 
-    def test_observation_and_required_reviews_do_not_write(self):
-        for merge, decision in ((False, ""), (True, "REVIEW_REQUIRED")):
+    def test_observation_verifies_source_and_returns_without_writing(self):
+        hub = FakeGitHub()
+        self.assertEqual(self.follow(hub, merge=False), {"pr": hub.pr["html_url"], "head": HEAD,
+                         "run_id": 50, "run_attempt": 2, "merged": False})
+        self.assertEqual(hub.writes, [])
+
+    def test_required_reviews_do_not_write(self):
+        hub = FakeGitHub()
+        hub.decision = "REVIEW_REQUIRED"
+        with self.assertRaises(TimeoutError):
+            self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
+
+    def test_native_auto_merge_waits_without_a_second_merge(self):
+        hub = FakeGitHub()
+        hub.pr["auto_merge"] = {"merge_method": "merge"}
+        with self.assertRaises(TimeoutError):
+            self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
+
+    def test_native_auto_merge_enabled_during_verification_stops_write(self):
+        hub = FakeGitHub()
+        source_report = hub.source_report
+
+        def proof(*args):
+            hub.pr["auto_merge"] = {"merge_method": "merge"}
+            return source_report(*args)
+
+        with patch.object(hub, "source_report", side_effect=proof), self.assertRaises(TimeoutError):
+            self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
+
+    def test_native_merge_waits_for_latest_ci_before_confirmation(self):
+        hub = FakeGitHub()
+        hub.pr.update(merged=True, state="closed", merge_commit_sha=MERGE)
+        hub.run["status"] = "in_progress"
+        api = hub.api
+        reads = []
+
+        def read(path, *args, **kwargs):
+            if path == "actions/runs/50":
+                reads.append(path)
+                if len(reads) == 2:
+                    hub.run["status"] = "completed"
+            return api(path, *args, **kwargs)
+
+        with patch.object(hub, "api", side_effect=read):
+            self.assertEqual(self.follow(hub, timeout=2, merge=True)["merge_commit"], MERGE)
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(hub.writes, [])
+
+    def test_native_merge_requires_the_expected_parents_and_source_proof(self):
+        for change in ("parents", "proof", "history"):
             hub = FakeGitHub()
-            hub.decision = decision
-            with self.subTest(merge=merge), self.assertRaises(TimeoutError):
-                self.follow(hub, merge=merge)
+            hub.pr.update(merged=True, state="closed", merge_commit_sha=MERGE)
+            if change == "parents":
+                hub.parents[1]["sha"] = TREE
+            elif change == "proof":
+                hub.report["passed"] = False
+            else:
+                hub.parents[0]["sha"] = ADVANCED
+                hub.ancestor = TREE
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.follow(hub, merge=True)
             self.assertEqual(hub.writes, [])
+
+    def test_run_failure_identifies_first_failed_job_and_attempt(self):
+        hub = FakeGitHub()
+        hub.run["conclusion"] = "failure"
+        hub.jobs.extend([
+            {"name": "Package verification", "conclusion": "failure", "completed_at": "2026-11-20T05:04:00Z"},
+            {"name": "Native package (macos-arm64)", "conclusion": "failure", "completed_at": "2026-11-20T05:00:00Z",
+             "steps": [{"name": "Exercise final binary", "conclusion": "failure",
+                        "completed_at": "2026-11-20T04:59:00Z"}],
+             "html_url": f"https://github.com/{REPO}/actions/runs/50/job/7"},
+        ])
+        with self.assertRaisesRegex(ValueError, r"CI run 50, attempt 2: failure; first failed job: .*"
+                                    r"Exercise final binary.*2026-11-20T04:59:00Z"):
+            self.follow(hub, merge=True)
+        self.assertEqual(hub.writes, [])
 
     def test_lost_merge_response_is_reconciled_without_replaying_write(self):
         hub = FakeGitHub()
@@ -231,13 +360,13 @@ class DeliveryGateTests(unittest.TestCase):
                 hub.tested_commit["tree"]["sha"] = HEAD
             else:
                 hub.tested_commit["parents"] = [{"sha": HEAD}]
-            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "CI package report"):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "CI source report"):
                 self.follow(hub, merge=True)
             self.assertEqual(hub.writes, [])
 
-    def test_missing_package_artifact_never_authorizes_merge(self):
+    def test_missing_source_artifact_never_authorizes_merge(self):
         hub = FakeGitHub()
-        with patch.object(hub, "package_report", side_effect=RuntimeError("artifact missing")):
+        with patch.object(hub, "source_report", side_effect=RuntimeError("artifact missing")):
             with self.assertRaisesRegex(RuntimeError, "artifact missing"):
                 self.follow(hub, merge=True)
         self.assertEqual(hub.writes, [])

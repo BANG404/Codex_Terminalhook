@@ -5,6 +5,8 @@ English | [简体中文](README.zh-CN.md)
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+![TerminalHook wordmark and a terminal prompt that folds back toward an amber cursor](docs/assets/terminalhook-banner.svg)
+
 TerminalHook is a Rust MCP server and Codex plugin for durable background commands,
 event-driven task dashboards, and completion delivery to the originating chat.
 Codex submits long or unpredictably timed work once, ends the turn, and receives

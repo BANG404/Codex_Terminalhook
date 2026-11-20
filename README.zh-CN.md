@@ -5,6 +5,8 @@
 [![CI](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml/badge.svg)](https://github.com/BANG404/Codex_Terminalhook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+![TerminalHook 字标与折回琥珀色光标旁的终端提示符](docs/assets/terminalhook-banner.svg)
+
 TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、事件驱动任务面板，
 以及向原聊天交付完成结果。Codex 会主动将预计耗时较长或完成时间难以预估的任务提交一次，随后结束回合，任务完成后接收已保存结果。
 原生 worker 在本地等待，不轮询模型，可跨越 MCP 断连继续运行。
