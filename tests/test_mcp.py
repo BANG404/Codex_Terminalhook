@@ -1,4 +1,5 @@
 """Background-only MCP contract and shared stdio test client; no model calls."""
+from base64 import b64encode
 import ctypes
 import json
 import os
@@ -33,7 +34,8 @@ class Client:
         self.error_reader.start()
         self.send("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                 "clientInfo": {"name": "terminalhook-test", "version": "1"}}, 1)
-        assert self.receive()["result"]["serverInfo"]["name"] == "terminalhook"
+        self.server_info = self.receive()["result"]["serverInfo"]
+        assert self.server_info["name"] == "terminalhook"
         self.send("notifications/initialized", {})
 
     def read(self):
@@ -117,13 +119,21 @@ class McpContractTests(unittest.TestCase):
         self.client.send("tools/list", {}, 2)
         tools = self.client.receive()["result"]["tools"]
         self.assertEqual({tool["name"] for tool in tools}, {
-            "check_background", "submit_task", "list_tasks", "get_task",
+            "submit_task", "list_tasks", "get_task",
             "cancel_task", "retry_delivery", "watch_tasks"})
         watch = next(tool for tool in tools if tool["name"] == "watch_tasks")
         self.assertEqual(watch["_meta"]["ui"]["visibility"], ["app"])
+        logo = (ROOT / "plugins/terminalhook/assets/terminalhook-logo.svg").read_bytes()
+        expected_icons = [{
+            "src": "data:image/svg+xml;base64," + b64encode(logo).decode("ascii"),
+            "mimeType": "image/svg+xml",
+            "sizes": ["any"],
+        }]
+        self.assertEqual(self.client.server_info["icons"], expected_icons)
         for tool in tools:
             if tool["name"] in ("submit_task", "get_task", "cancel_task", "retry_delivery"):
                 self.assertEqual(tool["_meta"]["ui"]["resourceUri"], "ui://terminalhook/tasks.html")
+                self.assertEqual(tool["icons"], expected_icons)
             elif tool["name"] == "list_tasks":
                 self.assertNotIn("_meta", tool)
         submit = next(tool for tool in tools if tool["name"] == "submit_task")
@@ -140,6 +150,11 @@ class McpContractTests(unittest.TestCase):
             response = self.client.receive()
             self.assertIn("error", response, name)
             self.assertIn("Unknown tool", response["error"]["message"])
+
+    def test_removed_background_check_cannot_be_called(self):
+        self.client.send("tools/call", {"name": "check_background", "arguments": {},
+                                        "_meta": {"threadId": "01a1e361-731f-7020-8ba1-5fb700728b78"}}, 2)
+        self.assertIn("Unknown tool", self.client.receive()["error"]["message"])
 
     def test_ping_and_dashboard_resource_work_without_a_background_host(self):
         self.client.send("ping", {}, 2)

@@ -213,7 +213,7 @@ def main():
             try:
                 client.send("tools/list", {}, 2)
                 tools = {tool["name"] for tool in client.receive()["result"]["tools"]}
-                assert tools == {"check_background", "submit_task", "get_task", "list_tasks",
+                assert tools == {"submit_task", "get_task", "list_tasks",
                                  "cancel_task", "retry_delivery", "watch_tasks"}, tools
             finally:
                 client.close()

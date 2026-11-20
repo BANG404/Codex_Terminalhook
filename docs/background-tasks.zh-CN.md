@@ -27,10 +27,10 @@ worker 将 stdout 和 stderr 写入任务日志，并保存宿主返回的退出
 宿主在此路径上不提供操作系统进程 ID，因此 `result.os_pid` 为 null。
 命令运行期间需要保持共享 App Server 连接，宿主提前退出时 TerminalHook 可保存连接错误。
 
-`check_background {}` 可检查此路径，不启动模型回合。缺少元数据或 daemon 时，
-提交会在启动命令前失败。宿主必须提供共享控制端点，仅有桌面 App Server 进程或磁盘上的
-socket 文件不能证明可连接。使用 `stdio` 通道启动的服务只接受其所属客户端的连接，
-新开聊天不会增加共享 socket。此版本仅提供后台任务接口；宿主不支持后台桥接时，请使用宿主终端。
+`submit_task` 会在启动新任务前校验请求元数据、共享宿主和原聊天。
+校验失败时，该调用直接返回具体错误，命令不会启动。
+仅使用 `stdio` 传输的服务只接受其所属客户端的连接。请使用共享控制端点，
+或在宿主终端中运行命令。
 
 代理依次从 `TERMINALHOOK_CODEX_BIN`、宿主的 `CODEX_APP_RUNTIME_CLI_PATH`、
 PATH 中的 `codex` 选择可执行文件。显式 `TERMINALHOOK_PROXY_COMMAND` 的优先级最高。
@@ -47,16 +47,9 @@ PATH 中的 `codex` 选择可执行文件。显式 `TERMINALHOOK_PROXY_COMMAND` 
 失败和取消会清理代理进程树。这些是代理的诊断信息，不是后台命令的 stdout/stderr。
 交付错误还会保存在任务状态的 `delivery_error` 中。
 
-2026-11-16 的 Windows 原生验证发现，Codex Desktop 26.1111.2228.0 使用 `stdio`
-App Server（CLI 0.169.0-alpha.11.1），默认共享 socket 返回 Windows 错误 10061，
-拒绝连接。PATH CLI 与桌面内置 CLI 均无法连接。此宿主配置下，当前桥接无法执行后台任务或唤醒聊天。
-不会启动替代 daemon、将聊天恢复到另一个服务，也不会在预检失败后执行命令。
-需要选择已经运行且拥有原聊天的共享宿主，或使用宿主终端。
-模拟 socket 测试不能证明原生桌面回调能力。
-
-macOS 上的 Desktop 26.1111.71704（内置 CLI 0.169.1）也通过 stdio 运行原聊天。
-默认控制 socket 不存在，内置代理在 WebSocket 握手前以
-`No such file or directory` 退出。
+如果代理报告 Windows 或 macOS 桌面端的共享端点不可用，请使用下文的共享宿主启动器，
+并在它打开的桌面会话中重新打开聊天。如果错误提示原聊天尚未加载，
+请在共享宿主中重新打开原聊天再提交。
 
 ### 可选的 Windows 桌面共享宿主
 
@@ -70,8 +63,7 @@ pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1
 启动器通过进程内的 `CODEX_CLI_PATH` 覆盖使用已安装的桌面 CLI，
 启动一个由桌面拥有、带私有 Unix socket 的核心服务，通过原生 proxy 转发桌面的 JSONL，
 并将同一 socket 与原生 CLI 路径传给插件和独立 worker。
-不会将现有 stdio 聊天接到另一个服务，预检仍不会启动服务。
-已有聊天需要在该桌面会话中重新打开。启动策略读取、CLI 子命令和版本检查原样转发。
+提交任务前，请在该桌面会话中重新打开已有聊天。启动策略读取、CLI 子命令和版本检查原样转发。
 普通启动模式发现桌面应用仍在运行时会拒绝启动，保留现有进程。
 不修改持久环境变量、登录、审批、沙箱或插件设置。正常打开桌面应用即可回到默认传输。
 活动会话不能在不重启桌面的情况下迁移。
@@ -103,8 +95,8 @@ sh ./Start-DesktopSharedHost.sh
 启动器使用所选桌面的内置 CLI，通过 Launch Services 将适配器覆盖项传给本次启动。
 它会保留已运行的桌面进程。
 
-与 Windows 一样，适配器让桌面和 TerminalHook 共用一个核心。请在该桌面会话中重新打开原聊天，
-提交任务前调用 `check_background` 确认。正常打开桌面应用即可恢复默认传输。
+与 Windows 一样，适配器让桌面和 TerminalHook 共用一个核心。请在该桌面会话中重新打开原聊天并提交任务。
+正常打开桌面应用即可恢复默认传输。
 如需使用自定义 `CODEX_HOME`，可在启动时传给脚本。如果这导致 Unix socket 路径过长，
 请用 `TERMINALHOOK_DESKTOP_SOCKET` 指向专用私有目录中的较短绝对路径。
 适配器为缺失目录设置仅所有者可访问的权限，并拒绝使用被占用的端点，包括 macOS 符号链接指向的活动 socket。
@@ -130,7 +122,7 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 提交失败或被中断后，应先核查原任务，再决定是否使用新键。
 
 等待 CI、构建或部署时，默认省略 `until` 和 `timeout_ms`，由原生等待命令在操作结束时退出。
-对于 GitHub Actions，使用 `gh run watch <run-id> --repo <owner/repo> --exit-status`。
+等待远程 CI 时，如果服务提供完成事件，优先使用该事件。
 只有用户或操作明确要求时，才为 worker、Shell 或等待命令设置有限期限。
 `timeout_ms` 接受 1–31536000000 毫秒（一年）。省略或设为 `null` 时，worker 没有执行期限。
 MCP 请求超时只约束提交调用。worker 独立运行，在命中、退出、主动取消或运行环境发生故障时停止。
@@ -139,7 +131,6 @@ MCP 请求超时只约束提交调用。worker 独立运行，在命中、退出
 可选 `until`、`streams`、`match_mode` 使用终端工具原有正则规则。
 命中或达到期限时，先终止并清理进程树，再交付结果。
 后台命令使用独立 stdout/stderr 管道且 stdin 关闭；交互输入和 PTY 使用宿主终端。
-原有 `run_until`、`wait_output`、`write_input`、`stop_process` 已删除，直接调用会被拒绝。
 
 ## 查看、取消与恢复
 
@@ -191,13 +182,39 @@ MCP 断连不会停止已提交的后台 worker；删除状态前应明确取消
 界面统一使用英语；任务名称和输出保留原始文本。`list_tasks` 仍可用于明确请求的聊天任务查询，
 但不打开面板。
 
+TerminalHook 通过插件清单、MCP 服务端和打开面板的工具提供同一个
+[项目 Logo](../plugins/terminalhook/assets/terminalhook-logo.svg)。
+聊天中面板标题栏显示的图标由宿主决定。
+
 Svelte 界面使用 [shadcn-svelte](https://www.shadcn-svelte.com/) 组件，
-不提供任务列表、搜索或状态筛选。点击“详情”展开任务标识、期限和交付回执。
+不提供任务列表、搜索或状态筛选。点击 **Details** 展开任务标识、期限和交付回执。
 输出区使用 shadcn-svelte 的 [Terminal 模式](https://shadcn-svelte.com/docs/ai-elements/terminal)。
 命令行以红色标出失败状态，点击可折叠或展开缩进的 Code Block。
 代码块默认展开，宽度随面板自适应，并跟随宿主主题。长行会自动换行。
 详情区和命令输出均使用 `ScrollArea`。将焦点移到 Output 区域后，可以用键盘滚动。
 外围面板跟随宿主主题，并请求宿主隐藏 MCP Apps 外框。
+
+### 任务面板预览
+
+**任务运行中（浅色主题）。** 执行徽标显示 `running`，交付徽标显示 `pending`。
+退出码可用前，**Exit** 显示 `—`。终端区域展示当前已捕获的命令输出。
+
+![validate-project 的浅色任务卡片，显示 running、pending、Exit — 和命令输出](assets/task-panel-running.png)
+
+**任务成功后（浅色主题）。** 示例显示 `completed`、**Exit** `0` 和最终命令输出。
+`delivered` 徽标表示 Codex 已接收要交付给原聊天的结果。
+
+![validate-project 的浅色任务卡片，显示 completed、delivered、Exit 0 和最终命令输出](assets/task-panel-completed.png)
+
+**任务失败后（深色主题）。** 示例中的 `sh` 以退出码 `1` 结束。
+`failed` 徽标和高亮的命令行表示执行失败。Codex 接收失败结果后，同样会显示 `delivered`。
+
+![validate-project 的深色任务卡片，显示 failed、delivered、Exit 1 和失败的命令输出](assets/task-panel-failed.png)
+
+截图来自浏览器测试宿主中的嵌入式面板。面板会跟随宿主主题。
+在纯文本宿主中，可从结构化工具结果读取执行状态、退出码和输出。
+
+### 面板如何更新
 
 完成 MCP Apps 握手后，面板等待当前工具的 `ui/notifications/tool-input` 或
 `ui/notifications/tool-result` 回调确定任务，不调用 `list_tasks`。

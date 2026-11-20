@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from distribution import PLATFORMS, archive_name, binary_name, desktop_host_binary_name, expected_files, git_mode, mcp_config
+from distribution import PLATFORMS, PLUGIN_ICON, archive_name, binary_name, desktop_host_binary_name, expected_files, git_mode, mcp_config
 sys.path.pop(0)
 
 
@@ -15,7 +15,10 @@ def package_data(info, target="windows-x64"):
     files = {name: b"runtime asset" for name in expected_files(target)}
     files["build-info.json"] = json.dumps(info).encode()
     files["platform.json"] = json.dumps({"platform": target}).encode()
-    files["plugins/terminalhook/.codex-plugin/plugin.json"] = json.dumps({"name": "terminalhook", "version": info["version"]}).encode()
+    files["plugins/terminalhook/.codex-plugin/plugin.json"] = json.dumps(
+        {"name": "terminalhook", "version": info["version"],
+         "interface": {"logo": "./" + PLUGIN_ICON, "composerIcon": "./" + PLUGIN_ICON}}
+    ).encode()
     files[".agents/plugins/marketplace.json"] = json.dumps({"name": "terminalhook-local", "plugins": [
         {"name": "terminalhook", "source": {"source": "local", "path": "./plugins/terminalhook"}}]}).encode()
     files["plugins/terminalhook/.mcp.json"] = json.dumps(mcp_config(target)).encode()
