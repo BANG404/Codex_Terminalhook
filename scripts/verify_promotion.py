@@ -1,4 +1,4 @@
-"""Require successful alpha source validation for the exact promotion tree."""
+"""Verify alpha source validation and publication for stage promotion."""
 import argparse
 from collections import deque
 import io
@@ -15,6 +15,10 @@ from distribution import PLATFORMS
 ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"[0-9a-f]{40}")
 REFRESH_CHECKS = ("Source refresh quality", "Source refresh verification")
+PUBLICATION_STEPS = {
+    "Publish the complete immutable platform set",
+    "Advance each platform's binary Git marketplace",
+}
 
 
 def git(*args):
@@ -106,6 +110,29 @@ class GitHub:
             matching.append(run)
         return max(matching, key=lambda run: run["id"], default=None)
 
+    def alpha_publication(self, revision):
+        query = f"actions/workflows/release.yml/runs?branch=alpha&event=workflow_dispatch&head_sha={revision}&per_page=100"
+        for run in self.pages(query, "workflow_runs"):
+            if (run["head_sha"] != revision or run["head_branch"] != "alpha"
+                    or run["event"] != "workflow_dispatch" or run["path"] != ".github/workflows/release.yml"
+                    or run["repository"]["full_name"] != self.repository
+                    or (run.get("head_repository") or {}).get("full_name") != self.repository):
+                continue
+            # A later validation-only run or rerun does not undo a completed publication.
+            run_id = run["id"]
+            jobs = self.pages(f"actions/runs/{run_id}/jobs?filter=all&per_page=100", "jobs")
+            for job in jobs:
+                if (job["name"] != "Publish verified distributions" or job["run_id"] != run_id
+                        or job["head_sha"] != revision or job["status"] != "completed"
+                        or job["conclusion"] != "success"):
+                    continue
+                completed = {step["name"] for step in job.get("steps", [])
+                             if step["status"] == "completed" and step["conclusion"] == "success"}
+                if PUBLICATION_STEPS <= completed:
+                    return {"source_revision": revision, "run_id": run_id,
+                            "run_attempt": job["run_attempt"], "job_url": job["html_url"]}
+        return None
+
     def proof(self, candidate, tree, source, pr=None):
         run = self.latest_run(candidate, pr)
         if not run or run["status"] != "completed" or run.get("conclusion") != "success":
@@ -154,14 +181,24 @@ class GitHub:
                 "verified_run_url": run["html_url"], "source_artifact_id": artifact["id"]}
 
 
-def find_proof(source, tree, github):
+def same_tree_ancestors(source, tree):
     pending = deque([source])
-    visited, tested = set(), set()
+    visited = set()
     while pending and len(visited) < 32:
         commit = pending.popleft()
         if commit in visited:
             continue
         visited.add(commit)
+        yield commit
+        # Stage merge commits have different revisions but must retain the tested tree.
+        for parent in git("show", "-s", "--format=%P", commit).split():
+            if git("rev-parse", f"{parent}^{{tree}}") == tree:
+                pending.append(parent)
+
+
+def find_proof(source, tree, github):
+    tested = set()
+    for commit in same_tree_ancestors(source, tree):
         proof = github.proof(commit, tree, source)
         if proof:
             proof["promotion_source"] = source
@@ -176,11 +213,18 @@ def find_proof(source, tree, github):
             if proof:
                 proof["promotion_source"] = source
                 return proof
-        # Stage merge commits may have different SHAs but must retain the tested tree.
-        for parent in git("show", "-s", "--format=%P", commit).split():
-            if git("rev-parse", f"{parent}^{{tree}}") == tree:
-                pending.append(parent)
     raise ValueError("No successful CI source evidence proves this tree; validate the alpha PR or refresh this source on alpha")
+
+
+def find_alpha_publication(source, tree, github):
+    for revision in same_tree_ancestors(source, tree):
+        publication = github.alpha_publication(revision)
+        if publication:
+            return publication
+    raise ValueError(
+        "No completed alpha publication for this source tree. Run Release on alpha with publish enabled "
+        "and wait for the GitHub Release and all platform marketplaces before retrying."
+    )
 
 
 def main():
@@ -193,7 +237,10 @@ def main():
     if not SHA.fullmatch(source):
         raise ValueError("Invalid promotion revision")
     tree = promotion_tree(git("rev-parse", "HEAD^{tree}"), git("rev-parse", f"{source}^{{tree}}"))
-    proof = find_proof(source, tree, GitHub(os.environ["GITHUB_REPOSITORY"]))
+    github = GitHub(os.environ["GITHUB_REPOSITORY"])
+    proof = find_proof(source, tree, github)
+    if pr or os.environ["GITHUB_REF"] != "refs/heads/alpha":
+        proof["alpha_publication"] = find_alpha_publication(source, tree, github)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
     if os.environ.get("GITHUB_OUTPUT"):

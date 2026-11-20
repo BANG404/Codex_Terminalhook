@@ -112,7 +112,8 @@ PR 未合并便关闭时停止。修复冲突或修改源码后，必须重新�
 python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 ```
 
-省略 `--merge` 时在 CI 验证通过后返回。暂时的网络或服务端读取失败会有限重试。
+省略 `--merge` 时在 CI 验证通过后返回。CI 尚未完成时，交付脚本每分钟检查一次状态。
+暂时的网络或服务端读取失败会有限重试。
 创建 PR 或合并响应不明确时，先核实实际 PR。默认跟随期限一小时，可用
 `--timeout` 指定秒数。残留锁须先核实再删除。运行针对性回归测试：
 `python -m unittest discover -s tests -p test_delivery.py -v`。
@@ -203,16 +204,19 @@ python3 scripts/verify_performance.py
 请使用独立任务 checkout：变异命令会临时修改校验器，测试结束后恢复。
 Linux 性能探针默认使用 debug 程序，可通过 `TERMINALHOOK_EXE` 指定其他原生程序。
 
-Beta、rc、main 晋级 PR 使用轻量 Linux 任务，检查阶段顺序并要求合并树等于来源树，
-再查找验证过完全相同源码树的成功 alpha CI。该次运行的源码报告必须可用且未过期。
-`promotion-validation.json` 记录原验证运行和源码树。证据过期且对应源码树仍位于 alpha 时，
+Beta、rc、main 晋级 PR 会检查阶段顺序，并要求合并树等于来源树。
+同一源码树必须通过 alpha CI，其源码报告必须仍然有效，同时也必须完成 alpha 发布。
+Alpha 的 Release 工作流须在同一次尝试中发布 GitHub Release，并更新五个平台的 marketplace。
+`promotion-validation.json` 记录源码验证和成功发布 alpha 的任务。证据过期且对应源码树仍位于 alpha 时，
 可在 alpha 手动运行 **CI** 刷新。工作流和测试属于源码树，修改后必须重新验证 alpha。
 
 源码提交排除编译后二进制、运行日志、本地聊天轨迹和凭据；仅 Release 会向独立 marketplace 分支写入二进制。
 
 ## 提升源码
 
-在已完成身份验证的 checkout 中执行：
+变更合并至 alpha 后，在 alpha 分支运行 **Release**，选择 `channel=alpha` 并开启 **publish**。
+等待 **Publish verified distributions** 成功，再将已发布的源码晋级到 beta。
+在已完成身份验证的 checkout 中依次创建各阶段晋级 PR：
 
 ```powershell
 ./scripts/promote.ps1 -Target beta
@@ -220,8 +224,8 @@ Beta、rc、main 晋级 PR 使用轻量 Linux 任务，检查阶段顺序并要�
 ./scripts/promote.ps1 -Target main
 ```
 
-每条命令只创建下一个阶段的 PR。CI 通过后审阅并合并。
-这些命令不发布产物。
+每条命令创建下一个阶段的 PR。CI 通过后审阅并合并。
+若晋级检查在 alpha 发布完成前失败，发布成功后重新运行失败的检查。
 
 ## CD / 手动发布
 
@@ -229,7 +233,8 @@ GitHub Actions 选择 **Release**，指定工作流分支及匹配渠道（`prod
 **publish** 关闭时仅验证，不改变发布版和 marketplace 引用；启用后发布完整原生产物集。
 四个阶段共用同一套五目标矩阵。
 
-可复用的发布验证工作流检查分支和 alpha 源码证据，共享一次仪表盘构建，随后执行原生测试、
+可复用的发布验证工作流检查分支和 alpha 源码证据。Beta、rc 和 main 上的 Release 运行还要求
+同一源码树已完成 alpha 发布。通过这些检查后，工作流共享一次仪表盘构建，随后执行原生测试、
 Assurance 和各目标的渠道打包。任务会校验共享仪表盘的源码提交和 HTML 校验和。
 打包与原生测试并行运行。
 

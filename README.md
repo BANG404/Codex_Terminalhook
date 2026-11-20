@@ -17,15 +17,32 @@ Native testing and distribution cover Windows x64, Linux x64/ARM64, and macOS
 Intel/Apple Silicon. Commands use separate stdout/stderr pipes and closed stdin.
 Windows Job Objects and Unix process groups contain command descendants.
 
-This release removes the former synchronous/interactive MCP tools:
-`run_until`, `wait_output`, `write_input`, and `stop_process`. Their dispatch paths,
-connection-local sessions, cursor replay, retained-process controls, and PTY
-backend are removed too. Existing integrations must migrate to the background
-workflow below; use the host terminal for foreground or interactive commands.
+Use the host terminal for quick or interactive commands.
 
-[Installation](#installation-and-upgrades) · [Task tools](#task-tools) ·
+[Task panel preview](#task-panel-preview) · [Installation](#installation-and-upgrades) ·
+[Task tools](#task-tools) ·
 [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) ·
 [Development and releases](docs/releasing.md)
+
+## Task panel preview
+
+In a compatible MCP Apps host, the task panel shows execution and delivery
+status, the exit code, and command output. These screenshots were captured in
+a browser test host.
+
+**Running**
+
+![Light task panel showing running, pending delivery, and partial command output](docs/assets/task-panel-running.png)
+
+**Completed**
+
+![Light task panel showing completed, exit code 0, and delivered](docs/assets/task-panel-completed.png)
+
+**Failed**
+
+![Dark task panel showing failed, exit code 1, and delivered](docs/assets/task-panel-failed.png)
+
+[Background task guide](docs/background-tasks.md#task-panel-preview)
 
 ## Installation and upgrades
 
@@ -63,13 +80,9 @@ fails during migration, it attempts to restore the previous source and tracking
 ref. The checkout supplies the installer scripts. The marketplace supplies the
 binary, MCP configuration, and runtime skill.
 
-### Verify background access
+### Desktop shared host
 
-Open a new Codex chat and ask Codex to call `mcp__terminalhook.check_background`
-with `{}`. A response containing `"status": "ready"` confirms that TerminalHook
-can reach the shared App Server and locate that chat.
-
-If the check fails because Windows or macOS Desktop uses stdio without a shared
+If `submit_task` reports that Windows or macOS Desktop has no reachable shared
 endpoint, quit Desktop. In an external terminal, enter the matching extracted
 Release ZIP directory or the `terminalhook-local` Git marketplace root shown by
 `codex plugin marketplace list`. Run the launcher for your platform.
@@ -79,9 +92,9 @@ Release ZIP directory or the `terminalhook-local` Git marketplace root shown by
 | Windows | `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` |
 | macOS | `sh ./Start-DesktopSharedHost.sh` |
 
-Open or reopen the chat in the Desktop session started by the launcher, then run
-`check_background` again before submitting work. If the check still fails, use
-the host terminal for commands. See the [background host troubleshooting guide](docs/background-tasks.md#connection-diagnostics-and-desktop-compatibility).
+Open or reopen the chat in the Desktop session started by the launcher and
+submit the task there. If the shared host is still unavailable, use the host
+terminal. See the [background host troubleshooting guide](docs/background-tasks.md#connection-diagnostics-and-desktop-compatibility).
 
 ### Upgrade and migrate settings
 
@@ -101,8 +114,8 @@ pass its package directory with `-Source` or `--source`. The installer adds
 `mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces` and
 sets `approval_mode = "approve"` for `submit_task` when neither that tool nor
 its TerminalHook server already has an approval mode. Open a new chat after
-updating or migrating and run `check_background` again. Existing chats retain
-their loaded tool catalog, and durable workers continue independently.
+updating or migrating to load the current tool catalog. Durable workers
+continue independently.
 [Codex marketplace commands](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)
 
 To switch to a published preview channel, pass `alpha`, `beta`, or `rc` to the
@@ -141,7 +154,6 @@ codex plugin marketplace remove terminalhook-local
 
 | Tool | Behavior |
 | --- | --- |
-| `check_background` | Verify the existing shared host and originating chat without starting a model turn |
 | `submit_task` | Start a long or unpredictably timed command under a stable `task_key` and immediately return its task ID |
 | `list_tasks` | Explicitly inspect the originating chat's tasks without opening a panel |
 | `get_task` | Inspect a saved result, execution state and delivery receipt for diagnosis |
@@ -152,19 +164,15 @@ codex plugin marketplace remove terminalhook-local
 Call tools directly in the `mcp__terminalhook` namespace. The installer adds this
 namespace to `[features.code_mode].direct_only_tool_namespaces` while preserving
 other settings. A manual plugin installation needs the same host configuration.
-Open a new chat after upgrading so the removed tools disappear from its catalog.
-The name TerminalHook refers to the plugin; current packages use native events
-and host callbacks and do not register Stop or other lifecycle hooks. The historical
-Stop-hook implementation remains on [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook).
+TerminalHook uses native events and host callbacks for completion delivery.
 
 When an in-scope command is expected to take a long time or may wait for an
 unpredictable duration, use `submit_task` proactively. The user's task request
-is sufficient to choose background execution. Before the first submission,
-call `check_background`. A reachable shared Codex daemon, CLI proxy and
-host-provided `threadId` metadata are required; TerminalHook never guesses a chat
-ID or starts another daemon during preflight. A stdio-only host with no shared
-endpoint cannot submit background work. See [Verify background access](#verify-background-access)
-for the Windows and macOS Desktop launchers.
+is sufficient to choose background execution. Submit directly with
+`submit_task`. A new submission requires a reachable shared Codex daemon, CLI
+proxy, and host-provided `threadId` metadata. The tool checks these before
+launch and returns the specific error if validation fails. See
+[Desktop shared host](#desktop-shared-host) for the Windows and macOS launchers.
 
 The following example submits a build.
 

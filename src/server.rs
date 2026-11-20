@@ -50,14 +50,6 @@ impl TerminalHook {
                     .clone(),
             ),
             Tool::new(
-                "check_background",
-                "Read-only check that the existing Codex daemon can access this calling chat. Does not start another app server or a model turn.",
-                json!({"type":"object","properties":{},"additionalProperties":false})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-            Tool::new(
                 "list_tasks",
                 "List background tasks for explicit inspection of the calling chat. Does not open a UI or launch tasks or a model turn.",
                 json!({"type":"object","properties":{},"additionalProperties":false})
@@ -79,7 +71,7 @@ impl TerminalHook {
             .map(|mut tool| {
                 if matches!(
                     tool.name.as_ref(),
-                    "list_tasks" | "get_task" | "check_background" | "watch_tasks"
+                    "list_tasks" | "get_task" | "watch_tasks"
                 ) {
                     tool.annotations = Some(
                         ToolAnnotations::new()
@@ -114,8 +106,11 @@ impl TerminalHook {
 impl ServerHandler for TerminalHook {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().enable_extensions_with(serde_json::from_value(json!({"io.modelcontextprotocol/ui":{"mimeTypes":[crate::ui::MIME]}})).unwrap()).build())
-            .with_server_info(Implementation::new("terminalhook", env!("TERMINALHOOK_VERSION")))
-            .with_instructions("Proactively use TerminalHook for commands within the user's task that are expected to take a long time or may wait for an unpredictable duration, such as waiting for CI or a deployment to finish. The user's task request is sufficient to choose background execution. Call check_background before the first submission to verify the existing shared host. Submit once with submit_task and a stable task_key, then end the turn and await completion delivery to this chat. Omit until to wait for natural exit. Leave timeout_ms unset and run the native wait command without an added shell or watcher deadline unless the user or the operation explicitly requires a finite deadline. The MCP request timeout applies to the submission call. The worker's lifetime is independent of it. Do not poll get_task or list_tasks, replay submissions, or start another daemon. Use get_task for diagnosis, cancel_task for explicit cancellation, and retry_delivery only for a saved result whose delivery failed before submission. Uncertain delivery requires reconciliation. Use the host terminal for quick or interactive commands. This package uses native events and existing-daemon callbacks without lifecycle hooks.")
+            .with_server_info(
+                Implementation::new("terminalhook", env!("TERMINALHOOK_VERSION"))
+                    .with_icons(vec![crate::ui::logo()]),
+            )
+            .with_instructions("Proactively use TerminalHook for commands within the user's task that are expected to take a long time or may wait for an unpredictable duration, such as waiting for CI or a deployment to finish. The user's task request is sufficient to choose background execution. Submit directly with submit_task and a stable task_key. For a new task, submission verifies the existing shared host and originating chat before launch and returns any verification error. After receiving the task ID, end the turn and await completion delivery to this chat. Omit until to wait for natural exit. Leave timeout_ms unset and run the native wait command without an added shell or watcher deadline unless the user or the operation explicitly requires a finite deadline. The MCP request timeout applies to the submission call. The worker's lifetime is independent of it. Do not poll get_task or list_tasks, replay submissions, or start another daemon. Use get_task for diagnosis, cancel_task for explicit cancellation, and retry_delivery only for a saved result whose delivery failed before submission. Uncertain delivery requires reconciliation. Use the host terminal for quick or interactive commands. This package uses native events and existing-daemon callbacks without lifecycle hooks.")
     }
 
     async fn list_tools(
@@ -164,7 +159,6 @@ impl ServerHandler for TerminalHook {
                 | "get_task"
                 | "cancel_task"
                 | "retry_delivery"
-                | "check_background"
                 | "list_tasks"
                 | "watch_tasks"
         ) {
@@ -173,7 +167,6 @@ impl ServerHandler for TerminalHook {
                 if uuid::Uuid::parse_str(thread_id).is_err() {return Err("Codex threadId is not a UUID".to_string());}
                 match request.name.as_ref() {
                     "submit_task" => background::submit(serde_json::from_value(args).map_err(|e|format!("Invalid arguments: {e}"))?,thread_id,context.ct.clone()).await,
-                    "check_background" => crate::bridge::probe(thread_id).await,
                     "list_tasks" => background::list(thread_id).await,
                     "watch_tasks" => background::watch_tasks(serde_json::from_value(args).map_err(|e|format!("Invalid arguments: {e}"))?,thread_id,context.ct.clone()).await,
                     name => {

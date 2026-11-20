@@ -9,6 +9,7 @@ repository = "https://github.com/BANG404/Codex_Terminalhook"
 readme = "README.md"
 
 [dependencies]
+data-encoding = "2"
 regex = "1"
 regex-syntax = "0.8"
 tempfile = "3"
@@ -29,9 +30,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-data-encoding = "2"
 
 [profile.release]
 lto = "thin"

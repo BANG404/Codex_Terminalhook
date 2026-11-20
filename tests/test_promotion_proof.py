@@ -1,6 +1,8 @@
 import importlib.util
+import json
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -167,6 +169,76 @@ class PromotionProofTests(unittest.TestCase):
             return "different-tree" if args[0] == "show" else "b" * 40
         with patch.object(proof, "git", side_effect=git), self.assertRaisesRegex(ValueError, "No successful CI"):
             proof.find_proof("stage", self.tree, GitHub())
+
+    def test_alpha_publication_requires_release_and_marketplace_steps_in_one_attempt(self):
+        run = dict(self.run, head_sha=self.source, head_branch="alpha", event="workflow_dispatch",
+                   path=".github/workflows/release.yml")
+        steps = [dict(name=name, status="completed", conclusion="success") for name in proof.PUBLICATION_STEPS]
+        published = dict(self.jobs[0], name="Publish verified distributions", head_sha=self.source,
+                         steps=steps, html_url="https://github.com/owner/repository/actions/runs/42/job/50")
+        skipped = dict(published, conclusion="skipped", run_attempt=3, steps=[])
+        partial = [dict(published, steps=[step], run_attempt=attempt)
+                   for attempt, step in enumerate(steps, start=1)]
+
+        def check(runs, jobs):
+            responses = {
+                (f"actions/workflows/release.yml/runs?branch=alpha&event=workflow_dispatch&head_sha={self.source}&per_page=100",
+                 "workflow_runs"): runs,
+                ("actions/runs/42/jobs?filter=all&per_page=100", "jobs"): jobs,
+            }
+            with patch.object(self.hub, "pages", side_effect=lambda *args: responses[args]):
+                return self.hub.alpha_publication(self.source)
+
+        self.assertEqual(check([run], [skipped, published]), dict(
+            source_revision=self.source, run_id=42, run_attempt=2, job_url=published["html_url"]))
+        self.assertIsNone(check([run], [skipped, *partial]))
+        for wrong in (dict(head_branch="beta"), dict(head_sha=self.head),
+                      dict(head_repository=dict(full_name="fork/repository")),
+                      dict(path=".github/workflows/ci.yml")):
+            with self.subTest(wrong=wrong):
+                self.assertIsNone(check([dict(run, **wrong)], [published]))
+
+    def test_alpha_publication_follows_only_ancestors_with_the_same_tree(self):
+        def git(*args):
+            if args[0] == "show":
+                return "old-alpha matching-alpha" if args[-1] == "stage" else ""
+            return self.tree if args[-1] == "matching-alpha^{tree}" else self.base
+
+        with (patch.object(proof, "git", side_effect=git),
+              patch.object(self.hub, "alpha_publication", return_value=None) as publication):
+            with self.assertRaisesRegex(ValueError, "No completed alpha publication"):
+                proof.find_alpha_publication("stage", self.tree, self.hub)
+            self.assertEqual([call.args[0] for call in publication.call_args_list], ["stage", "matching-alpha"])
+            evidence = {"source_revision": "matching-alpha", "run_id": 42}
+            publication.side_effect = [None, evidence]
+            self.assertEqual(proof.find_alpha_publication("stage", self.tree, self.hub), evidence)
+
+    def test_alpha_release_can_publish_before_later_stages_require_its_evidence(self):
+        cases = (
+            ("refs/heads/alpha", {}, False),
+            ("refs/heads/beta", {}, True),
+            ("refs/heads/rc", {}, True),
+            ("refs/heads/main", {}, True),
+            ("refs/pull/13/merge", {"pull_request": {"head": {"sha": self.source}}}, True),
+        )
+        evidence = {"run_id": 42}
+        for ref, event, required in cases:
+            with self.subTest(ref=ref), TemporaryDirectory() as directory:
+                event_path = Path(directory) / "event.json"
+                report_path = Path(directory) / "promotion-validation.json"
+                event_path.write_text(json.dumps(event), encoding="utf-8")
+                env = {"GITHUB_EVENT_PATH": str(event_path), "GITHUB_REF": ref,
+                       "GITHUB_SHA": self.source, "GITHUB_REPOSITORY": self.repository}
+                with (patch.dict(proof.os.environ, env, clear=True),
+                      patch.object(sys, "argv", ["verify_promotion.py", "--output", str(report_path)]),
+                      patch.object(proof, "git", return_value=self.tree),
+                      patch.object(proof, "find_proof", return_value={"passed": True}),
+                      patch.object(proof, "find_alpha_publication", return_value=evidence) as publication,
+                      patch("builtins.print")):
+                    proof.main()
+                self.assertEqual(publication.call_count, int(required))
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertEqual(report.get("alpha_publication"), evidence if required else None)
 
 
 if __name__ == "__main__":

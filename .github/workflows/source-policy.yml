@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       require_promotion_proof:
-        description: Locate successful alpha source validation for the current tree
+        description: Verify alpha source evidence and require publication for later stages
         type: boolean
         default: false
 
@@ -42,7 +42,7 @@ jobs:
         run: |
           python scripts/check_promotion.py
           python scripts/check_metadata.py
-      - name: Reuse alpha source evidence
+      - name: Verify alpha source and publication evidence
         if: inputs.require_promotion_proof
         env:
           GH_TOKEN: ${{ github.token }}
