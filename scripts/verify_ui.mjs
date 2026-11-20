@@ -115,7 +115,16 @@ try {
       args: [
         "-u",
         "-c",
-        "import time; print('Build started'); time.sleep(3); print('<img src=x onerror=alert(1)>'); print('Build finished 中文')",
+        [
+          "import time",
+          "print('Build started')",
+          "time.sleep(3)",
+          "for step in range(1, 13):",
+          "    print(f'[{step:02d}/12] Compiled workspace module')",
+          "print('a' * 240)",
+          "print('<img src=x onerror=alert(1)>')",
+          "print('Build finished 中文')",
+        ].join("\n"),
       ],
       cwd: root,
     })
@@ -220,12 +229,26 @@ try {
   assert.equal(await frame.locator("html").getAttribute("lang"), "en");
   // Native state/result events must update this task without list reads.
   await frame.locator(".task-badges .status-badge").filter({hasText: "completed"}).waitFor();
-  await frame.locator("#detail pre").filter({hasText: "Build finished"}).waitFor();
+  const outputRegion = frame.getByRole("region", { name: "Output", exact: true });
+  const outputText = outputRegion.locator("pre");
+  await outputText.filter({hasText: "Build finished"}).waitFor();
   await frame.getByLabel("Delivery: delivered", {exact: true}).waitFor();
   const actual = (await tool("get_task", { task_id: submitted.task_id })).structuredContent;
   assert.equal(actual.status, "completed");
-  assert.equal(await frame.locator("#detail pre img").count(), 0);
-  assert.match(await frame.locator("#detail pre").innerText(), /<img src=x onerror=alert\(1\)>/);
+  assert.equal(await outputText.locator("img").count(), 0);
+  assert.match(await outputText.innerText(), /<img src=x onerror=alert\(1\)>/);
+  assert.equal(await frame.locator("#detail").getAttribute("data-slot"), "scroll-area-viewport");
+  assert.equal(await outputRegion.getAttribute("data-slot"), "scroll-area-viewport");
+  assert.equal(await outputRegion.evaluate(el => getComputedStyle(el).scrollbarWidth), "none");
+  await frame.locator(".output-terminal [data-slot=scroll-area-thumb]").waitFor();
+  await outputRegion.press("End");
+  const appFrame = page.frame({ url: "about:srcdoc" });
+  await appFrame.waitForFunction(() => {
+    const viewport = document.querySelector(".output-viewport");
+    return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
+  });
+  await outputRegion.press("Home");
+  await appFrame.waitForFunction(() => document.querySelector(".output-viewport").scrollTop === 0);
   await frame.getByRole("button", { name: "Details", exact: true }).click();
   await frame.getByText("No deadline", { exact: true }).waitFor();
   await frame.getByRole("button", { name: "Details", exact: true }).click();
@@ -269,6 +292,7 @@ try {
   assert.ok(mobileSize.height <= 340, `mobile height: ${mobileSize.height}`);
   assert.ok(mobileSize.width <= 324, `mobile width: ${mobileSize.width}`);
   assert.ok(await frame.locator("body").evaluate(body => body.scrollWidth <= body.clientWidth));
+  assert.ok(await outputRegion.evaluate(el => el.scrollWidth <= el.clientWidth));
   await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard-mobile.png")});
   await page.evaluate(() => document.querySelector("iframe").contentWindow.postMessage({
     jsonrpc: "2.0", id: 998, method: "ui/resource-teardown", params: {},
@@ -307,6 +331,7 @@ try {
     compact_desktop_height: desktopSize.height,
     compact_mobile_height: mobileSize.height,
     output_escaped: true,
+    output_component_scrollbar_and_keyboard: true,
     external_requests: 0,
     model_messages: 0,
     host: "Playwright MCP Apps bridge simulation; not native desktop rendering",

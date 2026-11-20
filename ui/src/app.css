@@ -125,7 +125,6 @@
 }
 .detail {
   min-width: 0;
-  overflow: auto;
   padding: 12px;
   max-height: 320px;
 }
@@ -198,33 +197,45 @@ dd {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-pre {
-  margin: 10px 0 0;
-  padding: 10px;
-  height: 140px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--muted);
+.output-terminal {
+  --scrollbar-thumb: #59737d;
+  --ring: #83d7bd;
+  margin-top: 10px;
+  border: 1px solid #2d3b43;
+  border-radius: var(--radius);
+  background: #10171d;
+  color: #dce8ed;
   font:
-    11px/1.6 ui-monospace,
+    11px/1.55 ui-monospace,
     SFMono-Regular,
     Consolas,
     monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .output-label {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 9px;
-  font-size: 10px;
-  color: var(--muted-foreground);
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 1px solid #2d3b43;
+  background: #1a252c;
+  color: #b6c9ce;
 }
-.output-label + pre {
-  margin-top: 5px;
+.output-label svg {
+  color: #83d7bd;
+}
+.output-viewport {
   height: 120px;
+}
+.output-viewport pre {
+  margin: 0;
+  padding: 8px 16px 8px 12px;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.output-placeholder {
+  color: #9aafb9;
 }
 .original-chat {
   line-height: 1.6;
@@ -282,9 +293,6 @@ pre {
   }
   .detail {
     padding: 10px;
-  }
-  pre {
-    height: 138px;
   }
   .statusbar {
     padding-inline: 8px;
