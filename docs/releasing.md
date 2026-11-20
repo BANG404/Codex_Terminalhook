@@ -19,7 +19,7 @@ snapshot seeds all four branches with the same commit. Subsequent changes use PR
 bootstrap/minimum baseline. Ordinary releases do not require editing those files;
 if the minimum is explicitly changed, update all three together. The target and
 channel suffixes are derived during packaging without editing tracked files. The binary's `--version`,
-MCP server identity, packaged manifest and `build-info.json` agree. CI rejects a
+MCP server identity, packaged manifest and `build-info.json` agree. Release rejects a
 dirty checkout, a mismatched source SHA or a mismatched channel/branch.
 
 ## Automatic target version
@@ -94,14 +94,19 @@ GitHub Actions App 15368, for the expected source HEAD, from the same latest
 `ci.yml` PR run and attempt. The helper verifies the corresponding real jobs,
 rechecks PR identity and gates before a SHA-bound `merge_method=merge` request,
 then proves the resulting commit has two parents with that source as its second.
-Native GitHub Auto-merge is not used and must not already be active on that PR.
+GitHub's repository setting **Allow auto-merge** makes **Enable auto-merge**
+available on eligible PRs. If an authorized maintainer enables it on a PR, GitHub
+waits for configured branch requirements. Select **Merge commit** for the
+two-parent history required by alpha delivery. The helper observes that request
+and verifies the completed merge and CI evidence for the original HEAD.
 
 Alpha advancement alone does not change the verified PR HEAD or require another
 source commit. Following sandboxpi's [source-gate policy](https://github.com/BANG404/sandboxpi/blob/alpha/.agents/skills/git-delivery/references/alpha-pr.md),
-the helper downloads the existing `package-verification` report from the verified
-CI run. Its recorded merge candidate must have the PR HEAD as its second parent
+the helper downloads `source-validation` from the verified CI run. It can also
+read the earlier package report for PRs validated before the workflow split.
+The recorded merge candidate must have the PR HEAD as its second parent
 and the reported source tree. Its first parent is the tested base: that base may
-be older than current alpha, but must remain its ancestor. Missing package proof,
+be older than current alpha, but must remain its ancestor. Missing source evidence,
 a mismatched candidate, or an alpha history rewrite blocks merge. This verifies
 the saved candidate; it does not claim the latest combined alpha tree was tested.
 
@@ -127,7 +132,7 @@ the printed identity instead of resubmitting source:
 python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 ```
 
-Omit `--merge` for observation only. Reads have bounded retries for transient
+Omit `--merge` to return after successful CI verification. Reads have bounded retries for transient
 network/server errors. Writes are never blindly retried; an ambiguous creation
 or merge response is reconciled against the actual PR. The default follow-up
 deadline is one hour, adjustable with `--timeout` in seconds. A stale lock must
@@ -151,57 +156,32 @@ optimization against the actual gates and retain the required evidence.
 
 ## CI
 
-Alpha PRs run formatting, Clippy, Rust unit tests, and Python protocol/release-policy
-tests on five native targets, alongside native package and installation checks:
+Alpha PRs run source checks on Linux x64, including dashboard types and build,
+formatting, Clippy, Rust unit tests, and Python delivery and release policy
+tests. The reusable security workflow runs dependency and script checks.
+Promotion PRs check stage order, prove that the source tree passed alpha
+validation, and run fresh security checks.
 
-| Target | Native runner | Binary |
-| --- | --- | --- |
-| windows-x64 | windows-2025 | terminalhook.exe |
-| linux-x64 | ubuntu-24.04 | terminalhook |
-| linux-arm64 | ubuntu-24.04-arm | terminalhook |
-| macos-x64 | macos-15-intel | terminalhook |
-| macos-arm64 | macos-15 | terminalhook |
+Branch protection requires **Quality checks** and **Package verification**.
+The second name is the required status name for CI's evidence gate. It records
+the tested merge candidate, Git tree, run ID and attempt in `source-validation`
+on alpha and checks the reuse of that evidence on promotion PRs. Failed,
+cancelled, or unexpectedly skipped prerequisites fail the gates. CD alone runs
+the five-target packaging workflow and produces `package-verification` and
+`release-distributions`.
 
-One Linux job audits the frontend lockfile before installing dependencies,
-checking types, and building the dashboard. A failed audit stops the native
-matrix before it starts. The security job still produces a fresh audit report
-for each assurance run. Native tests, packages, and assurance jobs reuse the
-`dashboard-bundle` artifact from the same run, verifying the source revision and
-HTML checksum before embedding it. Native tests and package builds start together after this bundle is
-ready. `Quality checks` still requires every test and assurance check;
-`Package verification` waits for both quality and every native package before
-assembling distributions. Failed or cancelled tests cannot authorize delivery or
-publication even if package builds finish successfully. Parallel builds reduce
-elapsed time but may do extra work when a test fails.
-
-Standalone Assurance runs build their own dashboard. Promotion-only PRs skip the
-frontend and native builds and continue to require source evidence and security checks.
-
-Each binary is tested from an extracted directory with spaces in its path. Each
-target verifies isolated installation, configuration preservation, Git migration
-and rollback, startup updates, explicit upgrades, and the actual cached MCP launch
-command. ZIPs and Git trees retain executable permissions. Linux uses glibc built
-on Ubuntu 24.04; Alpine/musl and Windows ARM64 are outside the release matrix.
-macOS binaries are unsigned and not notarized.
-
-Required branch checks remain **Quality checks** and **Package verification**.
-They aggregate all native results and reject failed, cancelled, or unexpectedly
-skipped work. Only a complete five-platform archive and installation evidence set
-can produce `release-distributions` and the aggregate `package-verification` report.
 Automatic PR validation runs only when a PR is opened (`opened`) or its source
 commits change (`synchronize`). Editing a title or description, reopening a PR,
 or marking it ready for review does not start or cancel CI. New source commits
-cancel obsolete runs. Branch pushes do not run a separate CI workflow; explicit
-manual runs and reusable workflow calls remain available. Actions are pinned to
-commit SHAs.
+cancel obsolete runs. Use the **CI** manual dispatch on the `alpha` branch to
+refresh evidence for that branch's current tree. Actions are pinned to commit SHAs.
 
 ### Test layers and gates
 
-Test types overlap: the protocol suite supplies black-box, boundary, integration,
-and permission/isolation checks; they are not separate copies of the same suite.
-The reusable `assurance.yml` workflow contributes to **Quality checks**. Its
-failure or cancellation blocks final package assembly and delivery. Promotion PRs rerun fresh
-security scans while reusing the exact alpha tree's native test evidence.
+The protocol suite supplies black-box, boundary, integration, and
+permission/isolation checks. CI and Assurance share the security workflow.
+Release calls the reusable Assurance workflow for security, coverage, mutation,
+and performance checks. Failures in required verification block publication.
 
 The dashboard's build dependencies temporarily use the pinned
 `@ryotsu/picomatch@4.0.7-a` backport for CVE-2026-112366. Remove the override
@@ -209,10 +189,10 @@ when the upstream package publishes a fixed release that passes the audit.
 
 | Layer | Execution | Gate |
 | --- | --- | --- |
-| Boundary and white-box | Every alpha PR: Rust unit tests, including inclusive background input limits and stream selection | All tests pass; `spec.rs` and `matcher.rs` each have at least 90% LLVM line coverage |
-| Black-box and integration | Every alpha PR: stdio MCP, child cleanup, background bridge, package/install/update tests on five platforms | All core protocol and installation scenarios pass |
-| Browser E2E | Every alpha PR on Linux x64; again against the final packaged executable before Release publication | Real MCP dashboard scenarios pass |
-| Static analysis and dependencies | Every PR and Release verification; daily scheduled scan | Clippy warnings fail; Bandit shell-injection rules B602/B604/B605/B609 pass; Cargo audit has no known vulnerabilities; npm audit has no high/critical issues, including development dependencies |
+| Boundary and white-box | Rust unit tests in alpha CI and Release; coverage in scheduled or manual Assurance and Release | All tests pass; the coverage job requires 90% LLVM line coverage in each of `spec.rs` and `matcher.rs` |
+| Black-box and integration | Release verification on five platforms | Stdio MCP, child cleanup, background bridge, and package/install/update scenarios pass |
+| Browser E2E | Release verification on Linux x64 | Real MCP dashboard scenarios pass against the final package |
+| Static analysis and dependencies | Clippy in alpha CI and Release; dependency and script scans in every PR, Assurance and Release | Clippy warnings fail. Bandit rules B602/B604/B605/B609 pass. Cargo and npm audits meet their thresholds, including npm build dependencies |
 | Mutation | Weekly, manual Assurance with `deep`, and Release verification | Every viable mutation of `validate_run` / `validate_deadline` is caught; surviving mutations, timeouts and baseline failures fail the job |
 | Performance | With mutation verification on Linux x64 | 20 real background worker completions with loopback host delivery, 64 KiB output and a 64 KiB matching window; nearest-rank p95 at most 3 seconds |
 
@@ -231,8 +211,8 @@ Assurance runs daily at 02:17 UTC for security and Mondays at 02:47 UTC for
 security, coverage, mutation and performance. GitHub schedules execute only from
 the repository's default branch, once that branch contains this workflow through
 the normal stage progression. Until then, use the **Assurance** manual dispatch on
-`alpha` (or run the commands locally); alpha PR and Release gates already call
-the reusable workflow directly. Scheduled runs never publish or promote source.
+`alpha` or run the commands locally. Scheduled runs run the selected Assurance
+jobs independently of publication and promotion.
 
 Native jobs pin Node 24 and cache npm downloads and Rust dependencies/builds.
 Rust cache keys separate OS, architecture, job, toolchain, lockfile and revision;
@@ -270,11 +250,11 @@ debug binary by default; `TERMINALHOOK_EXE` selects another native executable.
 
 Promotion PRs on beta, rc, and main use lightweight Linux jobs to enforce stage
 order, require the merge tree to equal the source tree, and locate a successful
-alpha CI run with that exact tested tree. Every platform's artifact, checksum,
-and source identity must be available and unexpired. Missing or mismatched evidence
-blocks promotion. No project Rust compilation, protocol rerun, or binary relabeling occurs
-during promotion. `promotion-validation.json` retains the original evidence.
-Workflow and test changes are part of the tree and require fresh alpha validation.
+alpha CI run with that exact tested tree. Its source report must be available and
+unexpired. `promotion-validation.json` records the original test run and tree.
+If that evidence expires while the tree is still on alpha, run **CI** manually
+on alpha to refresh it. Workflow and test changes are part of the tree and
+require fresh alpha validation.
 
 Compiled binaries, runtime logs, local chat traces, and credentials are excluded
 from source commits. Only Release writes binaries to dedicated marketplace branches.
@@ -299,13 +279,29 @@ channel (`production` uses `main`). With **publish** disabled the workflow valid
 without changing release or marketplace refs. Enable it to publish the complete
 native platform set. All four stages use the same five-target matrix.
 
-The workflow checks the branch, reuses complete alpha source validation, and
-builds the final channel version once per target. Every packaged binary passes
-protocol, installation, Git update, a 65-second background task across MCP disconnection, and 90-second
-UTF-8 output regressions. Windows additionally runs the PowerShell UTF-8
-long-wait regression. Stage promotion does not relabel alpha binaries.
+The reusable release verification workflow checks the branch and alpha source
+evidence, builds the dashboard once, then runs native tests, Assurance, and
+channel packaging for the targets below. Jobs verify the shared dashboard's
+source revision and HTML checksum. Packaging and native tests run in parallel.
 
-The aggregate validates all source identities, checksums, native launch configs,
+| Target | Native runner | Binary |
+| --- | --- | --- |
+| windows-x64 | windows-2025 | terminalhook.exe |
+| linux-x64 | ubuntu-24.04 | terminalhook |
+| linux-arm64 | ubuntu-24.04-arm | terminalhook |
+| macos-x64 | macos-15-intel | terminalhook |
+| macos-arm64 | macos-15 | terminalhook |
+
+Every packaged binary is tested from an extracted path with spaces. The tests
+verify protocol, isolated installation, configuration preservation, Git migration
+and rollback, startup updates, explicit upgrades, and the actual cached MCP
+launch command. Long-wait cases cover a 65-second background task across an MCP
+disconnection, 90-second UTF-8 output, and an additional PowerShell test on
+Windows. ZIPs and Git trees retain executable permissions. Linux packages use
+Ubuntu 24.04 glibc. macOS packages are unsigned and are distributed without notarization.
+
+The aggregate requires the native test and Assurance results, then validates
+all source identities, checksums, native launch configs,
 binary formats, and executable permissions before publication. A release contains
 five `terminalhook-<platform>.zip` assets, one `SHA256SUMS.txt` covering all five,
 and the shared `build-info.json`. A write-scoped job creates an annotated
@@ -345,7 +341,7 @@ completed platform refs remain. Retry the same Release request to finish missing
 refs; existing identical platforms are skipped, and newer heads are never overwritten.
 
 Codex owns startup refresh and installed-cache updates; there is no updater daemon
-or lifecycle hook. CI pins Codex CLI 0.167.0 and verifies local migration, failed-ref
+or lifecycle hook. Release verification pins Codex CLI 0.167.0 and tests local migration, failed-ref
 restoration, automatic app-server startup updates, the official upgrade command,
 and the actual cached MCP command against a loopback Git server on every target.
 Tests use isolated Codex homes and create no model turns. They do not establish
@@ -358,13 +354,13 @@ is preserved on `legacy/stop-hook`.
 
 ## Dashboard verification
 
-The Linux x64 alpha test job also runs the embedded MCP Apps dashboard in
+The Linux x64 Release job runs the embedded MCP Apps dashboard in
 Playwright against the real TerminalHook stdio server and a deterministic host
 fixture. It verifies the resource, task tools, single-task isolation without list
 reads, English-only controls, callback updates without idle/visibility polling or
 callback feedback loops, compact responsive layout, host themes, escaped output,
 and absence of external requests or UI model messages. These checks
-contribute to `Quality checks`; native desktop rendering remains a separate
+contribute to release verification. Native desktop rendering remains a separate
 host integration check. Node.js 20.19+ or 22.12+ and npm are needed for source
 builds; Playwright is used only for verification. The installed MCP binary needs
 neither. Before Cargo commands, build the self-contained Svelte/Tailwind bundle:
@@ -379,8 +375,9 @@ npm run test:ui
 ```
 
 Screenshots and evidence are written under ignored `artifacts/` and uploaded by
-CI. Background execution/host-delivery regressions run in the ordinary Python
-protocol suite on every native platform. See [background tasks](background-tasks.md).
+release verification. The Python protocol suite runs background execution and
+host delivery regressions against the packaged binary on every native platform.
+See [background tasks](background-tasks.md).
 
 Edit `ui/src/`; `components.json` configures the checked-in shadcn-svelte
 components. `npm run dev:ui` previews layout locally (task data requires an MCP
@@ -389,7 +386,7 @@ scripts, styles, and icons inline. Cargo embeds this file; rebuild it after UI
 changes and before compiling Rust. Packaging runs `npm ci`, type checks, and
 bundling automatically. No CDN or frontend runtime is needed after installation.
 
-CI explicitly passes `--prebuilt-dashboard` to `scripts/package.py` after downloading
+The release workflow passes `--prebuilt-dashboard` to `scripts/package.py` after downloading
 the shared bundle. This option requires `ui/dist/index.html` and its
 `build-info.json` manifest to match the current source revision and checksum;
 missing or mismatched artifacts fail before Rust compilation. Local packaging
