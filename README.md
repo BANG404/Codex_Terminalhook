@@ -22,28 +22,36 @@ Codex CLI and Git must already be installed for Git installation. Windows uses `
 
 Runtime does not require Rust, Python, or Node. Unix installation alone needs Python 3.11+; Windows installation uses PowerShell 7. Offline Windows installation uses `pwsh -NoProfile -File ./install.ps1 -Source .`. Keep local installation directories in place; local mode needs no Git and does not download future updates. Without `-Source` / `--source`, installers select the Git distribution. Preserve ZIP executable permissions when extracting on Unix (for example with `unzip`). Linux builds use glibc compatible with Ubuntu 24.04; macOS binaries are unsigned and not notarized.
 
-This release exposes background-task tools only. The former `run_until`,
-`wait_output`, `write_input`, and `stop_process` MCP interfaces, connection-local
-sessions, cursor replay and PTY backend have been removed. Use the host terminal
-for foreground or interactive work. Command stdin is closed; background output
-uses separate stdout/stderr pipes. A natural result has `status: "exited"` and the
-actual exit code, without a process handle or output cursor.
+Use the host terminal for foreground or interactive work. Background commands
+close stdin and capture stdout and stderr separately. A natural result has
+`status: "exited"` and the actual exit code.
 
 The installer adds `mcp__terminalhook` to
 `[features.code_mode].direct_only_tool_namespaces`, preserving other settings.
 The installer sets `approval_mode = "approve"` for `submit_task` when the user
 has set no approval mode for the tool or the TerminalHook server.
 Manual installations need the same host configuration. Open a new chat after an
-upgrade to load the changed tool catalog. Current packages use native events and
-host callbacks without lifecycle hooks. The historical Stop-hook implementation
-remains on [legacy/stop-hook](https://github.com/BANG404/Codex_Terminalhook/tree/legacy/stop-hook).
+upgrade to load the current tool catalog.
 
 Example request to Codex:
 
 > Run the build and tell me when it finishes.
 
-Proactively use `submit_task` when an in-scope command is expected to take a long time or may wait for an unpredictable duration. The user's task request is sufficient to choose background execution. Call `check_background` before the first submission. Use a stable `task_key`, program/args, and absolute `cwd`. Omit `timeout_ms` for no execution deadline and `until` for natural exit. After receiving the task ID, end the turn and await delivery to the originating chat. Background workers and their saved results survive MCP disconnection, but execution does not resume after a reboot. In compatible hosts, the submission opens a task panel. Use `list_tasks` for chat-wide inspection and `get_task`, `cancel_task`, or `retry_delivery` for a specific task. A running shared Codex daemon, CLI proxy, and host-provided `threadId` metadata are required. Delivery failures preserve results. See the [full guide](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.md).
+Submit long or unpredictably timed commands directly with `submit_task`. Use a
+stable `task_key`, program/args, and absolute `cwd`. The tool validates the
+shared Codex daemon and original chat before launch and returns any validation
+error in the same call. Omit `timeout_ms` for no execution deadline and `until`
+for natural exit. After receiving the task ID, end the turn and await delivery
+to the originating chat. In compatible hosts, submission opens a task panel.
+Use `list_tasks` for chat-wide inspection and `get_task`, `cancel_task`, or
+`retry_delivery` for a specific task. See the
+[background task guide](https://github.com/BANG404/Codex_Terminalhook/blob/alpha/docs/background-tasks.md).
 
-For Desktop hosts that normally use stdio, quit Desktop and run the shared-host launcher from this extracted package. Use `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` on Windows or `sh ./Start-DesktopSharedHost.sh` on macOS. The adapter gives Desktop and the worker one shared core without changing persistent settings or command permissions. Reopen the original chat in that session and run `check_background` before submitting. Normal Desktop startup restores the default transport.
+If Desktop uses stdio and submission reports that the shared endpoint is
+unavailable, quit Desktop and run the shared-host launcher from this extracted
+package. Use `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` on Windows
+or `sh ./Start-DesktopSharedHost.sh` on macOS. Reopen the original chat in
+that session and submit the task there. Normal Desktop startup restores the
+default transport.
 
 To uninstall, run `codex plugin remove terminalhook@terminalhook-local`, then optionally `codex plugin marketplace remove terminalhook-local`.
