@@ -121,12 +121,12 @@ impl Bridge {
         }
     }
 
-    pub async fn verify_thread(&mut self, thread_id: &str) -> Result<Value, String> {
+    pub async fn verify_thread(&mut self, thread_id: &str) -> Result<(), String> {
         let thread = self.read_thread(thread_id).await?;
         if !thread_is_loaded(&thread)? {
             return Err("original thread is not loaded in this Codex daemon; reopen it before submitting background work".into());
         }
-        Ok(thread)
+        Ok(())
     }
 
     async fn read_thread(&mut self, thread_id: &str) -> Result<Value, String> {
@@ -219,13 +219,6 @@ fn thread_is_loaded(thread: &Value) -> Result<bool, String> {
         Some("notLoaded") => Ok(false),
         _ => Err("Codex returned an unknown thread status".into()),
     }
-}
-
-pub async fn probe(thread_id: &str) -> Result<Value, String> {
-    let mut bridge = Bridge::connect().await?;
-    let result = bridge.verify_thread(thread_id).await.map(|thread| json!({"status":"ready","thread_id":thread["id"],"cwd":thread["cwd"],"thread_status":thread["status"]}));
-    bridge.close().await;
-    result
 }
 
 pub fn task_root() -> Result<PathBuf, String> {
