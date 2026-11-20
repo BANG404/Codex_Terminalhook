@@ -2,9 +2,11 @@
   import { onMount } from "svelte";
   import { Terminal, ChevronDown, Clock3, Folder } from "@lucide/svelte";
   import * as Collapsible from "$lib/components/ui/collapsible";
+  import { ScrollArea } from "$lib/components/ui/scroll-area";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
+  import TaskTerminal from "$lib/components/TaskTerminal.svelte";
   import { HostBridge, HostResponseTimeout, TaskChatMismatch } from "$lib/bridge";
-  import { output, type Task, type TaskUpdate } from "$lib/tasks";
+  import type { Task, TaskUpdate } from "$lib/tasks";
   import { labels as t, statusLabel } from "$lib/labels";
 
   let task = $state<Task | null>(null);
@@ -161,11 +163,14 @@
 </script>
 
 <main class="dashboard" aria-label={t.title}>
-    <section
-      id="detail"
-      class="detail"
-      aria-label={t.details}
-      aria-busy={detailBusy}
+    <ScrollArea
+      viewportProps={{
+        id: "detail",
+        class: "detail",
+        role: "region",
+        "aria-label": t.details,
+        "aria-busy": detailBusy,
+      }}
     >
       {#if foreignTask}
         <div class="original-chat" role="status">
@@ -217,18 +222,11 @@
               task.launch_error?.error ||
               task.error}
           </div>{/if}
-        <div class="output-label">
-          <Terminal class="size-3" />{t.output}{#if detailBusy}<span
-              class="loading-dot"
-            ></span>{/if}
-        </div>
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable output needs keyboard access.) -->
-        <pre tabindex="0" role="region" aria-label={t.output}>{output(task) ||
-            (detailBusy ? t.loading : t.nooutput)}</pre>
+        <TaskTerminal {task} {detailBusy} />
       {:else}<div class="empty">
           <Terminal class="size-5" /><span>{t.select}</span>
         </div>{/if}
-    </section>
+    </ScrollArea>
   <div
     class="statusbar"
     role="status"
