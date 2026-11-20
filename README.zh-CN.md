@@ -20,36 +20,74 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、�
 
 ## 安装与升级
 
-TerminalHook 通过 Git marketplace 分发，包含原生二进制、MCP 配置和运行期技能。安装器自动选择当前系统和架构。Windows 保留 `marketplace` 及 `marketplace-alpha/beta/rc`；Unix 分支在渠道分支后追加 `-linux-x64`、`-linux-arm64`、`-macos-x64` 或 `-macos-arm64`。各平台/渠道在首次执行发布版 Release 工作流后可用。源码分支不包含编译后二进制，不能直接作为二进制 marketplace 安装。
+### 安装稳定版
 
-开发采用 `alpha → beta → rc → main` 阶段分支。变更通过 PR：`alpha` 完整验证，后续提升核对源码树并复用原验证产物，避免 push 与 PR 重复执行。根据适用稳定版之后的 Conventional Commits 计算共同目标版本；alpha/beta/rc 添加渠道、提交序号和源码 SHA，production 使用无后缀目标版本。发布由 Release 工作流手动触发。详见 [开发、CI/CD 和阶段发布](docs/releasing.zh-CN.md)。项目使用 [MIT 许可证](LICENSE)。
+确保 Git 和 Codex CLI 已加入 PATH。Windows x64 使用 PowerShell 7，Linux 和 macOS 安装时需要
+Python 3.11+。安装器会按系统和架构选择包含预编译产物的 Git marketplace。安装后的 MCP 二进制
+无需 Rust、Python 或 Node 即可运行。
 
-开发任务使用 `scripts/deliver.py` 及仓库的[任务完成规则](AGENTS.md)，自动提交 alpha PR，并在当前来源的实际 CI 成功后合并。这不会提升后续阶段或发布版本。参见[自动交付到 alpha](docs/releasing.zh-CN.md#任务完成与自动交付到-alpha)。
-
-从源码 checkout 安装 Git 分发版，无需构建 Rust：
-
-```powershell
-pwsh -NoProfile -File scripts/install.ps1
-# 可选：改为跟踪预发布渠道。
-pwsh -NoProfile -File scripts/install.ps1 -Channel beta
-```
-
-Linux 或 macOS 使用 POSIX 启动脚本（安装时需要 Python 3.11+）：
+获取安装脚本并进入检出目录。
 
 ```sh
-sh scripts/install.sh
-sh scripts/install.sh --channel alpha
+git clone --depth 1 --branch main https://github.com/BANG404/Codex_Terminalhook.git
+cd Codex_Terminalhook
 ```
 
-安装器注册 Git marketplace、安装并启用插件、配置原生直接调用。已有本地安装会迁移，保留 `terminalhook@terminalhook-local` 和其他用户设置。marketplace 名称保留历史 `-local` 后缀以兼容旧配置，实际来源为 Git。marketplace 注册失败会恢复原来源和跟踪分支。插件安装需要 Codex CLI，Git 安装还需要 Git。Windows 使用 PowerShell 7；Linux/macOS 安装使用 Python 3.11+。安装后的 MCP 二进制运行不需要 Rust、Python 或 Node。
+在源码根目录运行对应平台的安装器。
 
-Codex 自身的启动任务刷新已配置的 Git marketplace 及已安装插件缓存。也可显式请求刷新：
+**Windows**
 
 ```powershell
+pwsh -NoProfile -File scripts/install.ps1 -Channel production
+```
+
+**Linux 和 macOS**
+
+```sh
+sh scripts/install.sh --channel production
+```
+
+安装器注册二进制 marketplace，安装并启用 `terminalhook@terminalhook-local`，并配置工具直接调用。
+从本地安装迁移时会保留插件 ID 和用户设置。迁移期间注册失败时，安装器会尝试恢复原来源和跟踪分支。
+源码检出目录提供安装脚本，marketplace 提供二进制、MCP 配置和运行期技能。
+
+### 验证后台功能
+
+新开一个 Codex 聊天，请 Codex 以 `{}` 为参数调用 `mcp__terminalhook.check_background`。
+返回 `"status": "ready"` 表示 TerminalHook 可以连接共享 App Server 并找到当前聊天。
+
+如果 Windows 或 macOS 桌面端使用 stdio 且缺少共享端点，导致预检失败，请退出桌面端。
+在外部终端进入对应 Release ZIP 的解压目录，或进入 `codex plugin marketplace list` 显示的
+`terminalhook-local` Git marketplace 根目录，运行对应平台的启动器。
+
+| 平台 | 启动命令 |
+| --- | --- |
+| Windows | `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` |
+| macOS | `sh ./Start-DesktopSharedHost.sh` |
+
+在启动器打开的桌面会话中新开或重新打开聊天，提交后台任务前再次运行 `check_background`。
+如果预检仍然失败，请使用宿主终端执行命令。参见[后台宿主排查指南](docs/background-tasks.zh-CN.md#连接诊断与桌面兼容性)。
+
+### 升级与配置迁移
+
+Codex 启动时会刷新已配置的 Git marketplace 和已安装插件缓存。也可以手动刷新当前跟踪的渠道。
+
+```sh
 codex plugin marketplace upgrade terminalhook-local
 ```
 
-更新跟随所选分支，不查询 GitHub 的 latest-release API。项目没有自建后台更新器，也不承诺 App 长期开启时的定时检查间隔。更新后新开 Codex 聊天；已有聊天保留已加载的工具目录，持久后台 worker 独立继续运行。参见[官方 marketplace 命令](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)。
+更新跟随配置中的 Git 分支。旧安装如需补齐当前宿主配置，请从已更新的源码检出目录重新运行安装器并指定原渠道
+（Windows 用 `-Channel`，Linux/macOS 用 `--channel`）。本地安装请用 `-Source` 或
+`--source` 指定本地包目录。安装器会将 `mcp__terminalhook` 加入
+`features.code_mode.direct_only_tool_namespaces`，并在 `submit_task` 及其 TerminalHook
+服务均未配置审批模式时，为该工具写入 `approval_mode = "approve"`。升级或迁移后新开聊天，
+再运行 `check_background`。已有聊天保留已加载的工具目录，持久后台 worker 独立继续运行。
+[Codex marketplace 命令](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)
+
+如需切换到已发布的预发布渠道，可为安装器的渠道选项传入 `alpha`、`beta` 或 `rc`。
+参见[发布渠道与 marketplace 分支](docs/releasing.zh-CN.md#cd--手动发布)。
+
+### 离线安装与本地开发
 
 离线安装或本地开发：从 [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases) 下载匹配系统/架构的 ZIP，解压到固定目录；Windows 执行 `pwsh -NoProfile -File ./install.ps1 -Source .`，Linux/macOS 执行 `sh ./install.sh --source .`。Unix 应使用 `unzip` 等保留可执行权限的解压工具。不指定本地来源时安装器选择 Git 稳定渠道。CI 预览 ZIP 也可从 [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions) 获取。
 
@@ -62,11 +100,13 @@ pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 
 Linux/macOS 使用 `python3 scripts/package.py --channel development` 构建，再执行 `sh scripts/install.sh --source ./dist/package` 安装。原生源码构建需要固定版本的 Rust 工具链、Python 3.11+，以及带 npm 的 Node.js 20.19+ 或 22.12+，用于打包 Svelte 面板。Linux 二进制使用 glibc（基于 Ubuntu 24.04 构建）；Alpine/musl 和 Windows ARM64 暂不作为发布目标。macOS 产物未签名，也未公证。
 
-`package.ps1` 生成 ZIP 及 `dist/SHA256SUMS.txt`。本地安装需要保留目录，文件变化后重新执行安装器，不下载远端更新。两种模式均使用标准 `codex plugin marketplace add`、`codex plugin add` 命令及 Codex 配置编辑接口，保留已有设置，并将 `mcp__terminalhook` 加入 `features.code_mode.direct_only_tool_namespaces`。此管理过程不发起模型请求。
+`package.ps1` 生成 ZIP 及 `dist/SHA256SUMS.txt`。请保留本地包目录，文件变化后重新运行安装器。
 
-如果用户尚未为 `submit_task` 或其 TerminalHook 服务配置审批模式，安装器会为该工具设置 `approval_mode = "approve"`。`examples/standalone.config.toml` 的独立 MCP 示例包含同一设置。独立服务和插件二选一，避免重复工具。项目中 `.codex/config.toml` 的启用设置只对受信任项目生效，也不能替代安装。MCP 命令使用本机账户权限，不继承 Codex 内置 shell 的逐命令沙箱。
+[独立 MCP 示例](examples/standalone.config.toml)包含同样的默认审批配置。同一聊天选用独立服务
+或插件之一，避免重复工具。项目中的 `.codex/config.toml` 启用设置适用于已安装插件的受信任项目。
+MCP 命令使用本机账户权限，运行在 Codex 内置 shell 的逐命令沙箱之外。
 
-卸载：
+### 卸载
 
 ```powershell
 codex plugin remove terminalhook@terminalhook-local
@@ -94,8 +134,8 @@ codex plugin marketplace remove terminalhook-local
 用户的任务请求本身足以选择后台执行。首次提交前调用 `check_background`。
 后台提交需要可连接的共享 Codex daemon、CLI proxy 及宿主提供的
 `threadId` 元数据；预检不会猜测聊天 ID，也不会启动另一个 daemon。
-只有 stdio 且没有共享端点的宿主无法提交后台任务。Windows Desktop 的可选共享宿主启动器见
-[后台任务指南](docs/background-tasks.zh-CN.md)。
+只有 stdio 且没有共享端点的宿主无法提交后台任务。Windows 和 macOS 桌面端的启动器见
+[验证后台功能](#验证后台功能)。
 
 以下示例提交一条构建命令。
 
