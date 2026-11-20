@@ -229,8 +229,10 @@ try {
   assert.equal(await frame.locator("html").getAttribute("lang"), "en");
   // Native state/result events must update this task without list reads.
   await frame.locator(".task-badges .status-badge").filter({hasText: "completed"}).waitFor();
+  const terminal = frame.locator("[data-slot=trace]");
+  const terminalTrigger = terminal.getByRole("button", { name: /^Ran / });
   const outputRegion = frame.getByRole("region", { name: "Output", exact: true });
-  const outputText = outputRegion.locator("pre");
+  const outputText = outputRegion.locator("[data-slot=code-block-code]");
   await outputText.filter({hasText: "Build finished"}).waitFor();
   await frame.getByLabel("Delivery: delivered", {exact: true}).waitFor();
   const actual = (await tool("get_task", { task_id: submitted.task_id })).structuredContent;
@@ -240,15 +242,23 @@ try {
   assert.equal(await frame.locator("#detail").getAttribute("data-slot"), "scroll-area-viewport");
   assert.equal(await outputRegion.getAttribute("data-slot"), "scroll-area-viewport");
   assert.equal(await outputRegion.evaluate(el => getComputedStyle(el).scrollbarWidth), "none");
-  await frame.locator(".output-terminal [data-slot=scroll-area-thumb]").waitFor();
+  await terminalTrigger.press("Enter");
+  await outputRegion.waitFor({ state: "hidden" });
+  assert.equal(await terminalTrigger.getAttribute("aria-expanded"), "false");
+  await terminalTrigger.press("Enter");
+  await outputRegion.waitFor();
+  assert.equal(await terminalTrigger.getAttribute("aria-expanded"), "true");
+  await terminal.locator("[data-slot=scroll-area-thumb]").waitFor();
   await outputRegion.press("End");
   const appFrame = page.frame({ url: "about:srcdoc" });
   await appFrame.waitForFunction(() => {
-    const viewport = document.querySelector(".output-viewport");
+    const viewport = document.querySelector("[data-slot=scroll-area-viewport][aria-label=Output]");
     return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
   });
   await outputRegion.press("Home");
-  await appFrame.waitForFunction(() => document.querySelector(".output-viewport").scrollTop === 0);
+  await appFrame.waitForFunction(
+    () => document.querySelector("[data-slot=scroll-area-viewport][aria-label=Output]").scrollTop === 0,
+  );
   await frame.getByRole("button", { name: "Details", exact: true }).click();
   await frame.getByText("No deadline", { exact: true }).waitFor();
   await frame.getByRole("button", { name: "Details", exact: true }).click();
@@ -331,6 +341,7 @@ try {
     compact_desktop_height: desktopSize.height,
     compact_mobile_height: mobileSize.height,
     output_escaped: true,
+    terminal_trace_collapses_with_keyboard: true,
     output_component_scrollbar_and_keyboard: true,
     external_requests: 0,
     model_messages: 0,

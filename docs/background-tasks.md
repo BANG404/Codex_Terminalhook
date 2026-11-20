@@ -238,11 +238,12 @@ available for explicit chat-wide inspection and does not open a panel.
 
 The Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/) components.
 There is no task list, search, or status filter. Details expands task identifiers,
-deadlines, and delivery receipts. The details and output use the shadcn-svelte
-`ScrollArea` component on desktop and narrow screens. Output wraps inside a
-dark terminal-style pane with monospace text. Focus the Output region to scroll
-it with the keyboard. The surrounding panel follows the host theme and requests
-that the host hide the MCP Apps frame.
+deadlines, and delivery receipts. Output uses the shadcn-svelte
+[Terminal pattern](https://shadcn-svelte.com/docs/ai-elements/terminal).
+The command row toggles a dark Code Block that starts open and wraps long lines.
+Both the details and command output use `ScrollArea`. Focus the Output region
+to scroll it with the keyboard. The surrounding panel follows the host theme
+and requests that the host hide the MCP Apps frame.
 
 After the MCP Apps initialize handshake, the panel waits for the originating
 `ui/notifications/tool-input` or `ui/notifications/tool-result` callback to identify

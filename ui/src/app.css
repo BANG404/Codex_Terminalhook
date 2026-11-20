@@ -198,44 +198,30 @@ dd {
   text-overflow: ellipsis;
 }
 .output-terminal {
+  --foreground: #dce8ed;
+  --muted-foreground: #b6c9ce;
+  --destructive: #ff9b9b;
   --scrollbar-thumb: #59737d;
   --ring: #83d7bd;
   margin-top: 10px;
+  overflow: hidden;
   border: 1px solid #2d3b43;
   border-radius: var(--radius);
   background: #10171d;
-  color: #dce8ed;
-  font:
-    11px/1.55 ui-monospace,
-    SFMono-Regular,
-    Consolas,
-    monospace;
 }
-.output-label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  border-radius: var(--radius) var(--radius) 0 0;
-  border-bottom: 1px solid #2d3b43;
+.output-trigger {
   background: #1a252c;
-  color: #b6c9ce;
 }
-.output-label svg {
-  color: #83d7bd;
+.output-trigger[aria-expanded="true"] {
+  border-radius: 0;
+  border-bottom: 1px solid #2d3b43;
 }
-.output-viewport {
-  height: 120px;
+.output-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
-.output-viewport pre {
-  margin: 0;
-  padding: 8px 16px 8px 12px;
-  font: inherit;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.output-placeholder {
-  color: #9aafb9;
+.output-trigger [data-slot="trace-line"]:not([data-status="error"]) > [data-slot="trace-icon"] {
+  color: var(--ring);
 }
 .original-chat {
   line-height: 1.6;

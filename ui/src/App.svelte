@@ -4,8 +4,9 @@
   import * as Collapsible from "$lib/components/ui/collapsible";
   import { ScrollArea } from "$lib/components/ui/scroll-area";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
+  import TaskTerminal from "$lib/components/TaskTerminal.svelte";
   import { HostBridge, HostResponseTimeout, TaskChatMismatch } from "$lib/bridge";
-  import { output, type Task, type TaskUpdate } from "$lib/tasks";
+  import type { Task, TaskUpdate } from "$lib/tasks";
   import { labels as t, statusLabel } from "$lib/labels";
 
   let task = $state<Task | null>(null);
@@ -22,7 +23,6 @@
   let syncing = false;
   let bridge: HostBridge;
   const standalone = window.parent === window;
-  const commandOutput = $derived(output(task));
   const elapsed = $derived(
     task?.result?.elapsed_ms != null
       ? `${(task.result.elapsed_ms / 1000).toFixed(1)}s`
@@ -222,23 +222,7 @@
               task.launch_error?.error ||
               task.error}
           </div>{/if}
-        <div class="output-terminal">
-          <div class="output-label" id="output-label">
-            <Terminal class="size-3.5" aria-hidden="true" />
-            {t.output}
-          </div>
-          <ScrollArea
-            viewportProps={{
-              class: "output-viewport",
-              tabindex: 0,
-              role: "region",
-              "aria-labelledby": "output-label",
-            }}
-          >
-            <pre class:output-placeholder={!commandOutput}>{commandOutput ||
-              (detailBusy ? t.loading : t.nooutput)}</pre>
-          </ScrollArea>
-        </div>
+        <TaskTerminal {task} {detailBusy} />
       {:else}<div class="empty">
           <Terminal class="size-5" /><span>{t.select}</span>
         </div>{/if}
