@@ -248,10 +248,12 @@ Run in an isolated task checkout: the mutation command temporarily edits the
 validator and restores it after testing. The Linux performance probe uses the
 debug binary by default; `TERMINALHOOK_EXE` selects another native executable.
 
-Promotion PRs on beta, rc, and main use lightweight Linux jobs to enforce stage
-order, require the merge tree to equal the source tree, and locate a successful
-alpha CI run with that exact tested tree. Its source report must be available and
-unexpired. `promotion-validation.json` records the original test run and tree.
+Promotion PRs on beta, rc, and main enforce stage order and require the merge tree
+to equal the source tree. For that exact tree, CI requires a successful alpha CI
+run with an unexpired source report and a completed alpha publication. The alpha
+Release workflow must have published the GitHub Release and advanced all five
+platform marketplaces in the same attempt. `promotion-validation.json` records
+the source validation and the successful alpha publication job.
 If that evidence expires while the tree is still on alpha, run **CI** manually
 on alpha to refresh it. Workflow and test changes are part of the tree and
 require fresh alpha validation.
@@ -261,7 +263,10 @@ from source commits. Only Release writes binaries to dedicated marketplace branc
 
 ## Promote source
 
-From an authenticated checkout:
+After merging the changes into alpha, run **Release** on the alpha branch with
+`channel=alpha` and **publish** enabled. Wait for **Publish verified
+distributions** to succeed before promoting the published source to beta. Then
+open the successive promotion PRs from an authenticated checkout:
 
 ```powershell
 ./scripts/promote.ps1 -Target beta
@@ -269,8 +274,9 @@ From an authenticated checkout:
 ./scripts/promote.ps1 -Target main
 ```
 
-Each command opens only the next stage's PR. Review and merge it after CI passes.
-The commands do not publish artifacts.
+Each command opens the next stage's PR. Review and merge it after CI passes.
+If a promotion check ran before alpha publication succeeded, rerun the failed
+checks after publication completes.
 
 ## CD / manual publication
 
@@ -280,9 +286,11 @@ without changing release or marketplace refs. Enable it to publish the complete
 native platform set. All four stages use the same five-target matrix.
 
 The reusable release verification workflow checks the branch and alpha source
-evidence, builds the dashboard once, then runs native tests, Assurance, and
-channel packaging for the targets below. Jobs verify the shared dashboard's
-source revision and HTML checksum. Packaging and native tests run in parallel.
+evidence. Release runs on beta, rc, and main also require completed alpha
+publication for the same source tree. After these checks it builds the dashboard
+once and runs native tests, Assurance, and channel packaging for the targets
+below. Jobs verify the shared dashboard's source revision and HTML checksum.
+Packaging and native tests run in parallel.
 
 | Target | Native runner | Binary |
 | --- | --- | --- |
