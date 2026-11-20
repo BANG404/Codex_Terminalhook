@@ -9,8 +9,8 @@ The former `run_until`, `wait_output`, `write_input`, and `stop_process` interfa
 are removed. Do not call them or reconstruct their connection-local sessions.
 Use the host's terminal for quick commands, interactive work, PTY, or service
 retention.
-Let native blocking commands handle foreground waits, with a bounded timeout and
-its supported continuation if needed; do not repeatedly invoke the model to wait.
+Use native blocking commands for foreground waits and the host terminal's
+supported continuation when needed. Avoid repeated model calls to wait.
 
 ## Submit once and await delivery
 
@@ -24,10 +24,14 @@ sufficient to choose background execution.
 2. Submit the command with `submit_task`, using a stable
    per-chat `task_key`, program/args array, and native absolute `cwd`. Use `env` for
    command environment overrides. Invoke a shell explicitly for shell syntax.
-3. Omit `until` or use `[]` to wait for natural exit. Optional output rules terminate
-   the command on a match. Omit/null `timeout_ms` for no execution deadline; a finite
-   deadline accepts 1..31536000000 ms. Worker deadlines are independent of the MCP
-   transport limit. Only stdout/stderr pipes are supported; stdin is closed.
+3. For CI, builds, and deployments, omit `until` and `timeout_ms` by default so the
+   native command can run to natural exit. For GitHub Actions, submit
+   `gh run watch <run-id> --repo <owner/repo> --exit-status`. Add a worker deadline
+   or a shell or watcher timeout only when the user or the operation explicitly
+   requires one. `timeout_ms` accepts 1..31536000000 ms for a finite deadline.
+   The MCP request timeout governs the submission call. The worker runs
+   independently. Optional output rules terminate the command on a match.
+   The worker uses stdout/stderr pipes and closes stdin.
 4. After the submission returns its `task_id`, end the turn and await the host-delivered
    result. Do not poll `get_task`/`list_tasks` or resubmit to keep waiting.
 
