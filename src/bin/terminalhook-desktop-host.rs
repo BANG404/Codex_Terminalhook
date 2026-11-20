@@ -1,5 +1,5 @@
 //! Explicit Desktop startup adapter: one Codex core, JSONL for Desktop and a
-//! private shared socket for TerminalHook. Never used as a preflight fallback.
+//! private shared socket for TerminalHook.
 use fs2::FileExt;
 use futures_util::{SinkExt, StreamExt};
 use std::{

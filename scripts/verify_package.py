@@ -54,7 +54,7 @@ def main():
         try:
             client.send("tools/list", {}, 2)
             tool_names = sorted(tool["name"] for tool in client.receive()["result"]["tools"])
-            assert set(tool_names) == {"check_background", "submit_task", "list_tasks", "get_task",
+            assert set(tool_names) == {"submit_task", "list_tasks", "get_task",
                                        "cancel_task", "retry_delivery", "watch_tasks"}, tool_names
         finally:
             client.close()

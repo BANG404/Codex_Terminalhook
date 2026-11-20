@@ -132,7 +132,8 @@ the printed identity instead of resubmitting source:
 python scripts/deliver.py follow 123 --head <40-character-source-sha> --merge
 ```
 
-Omit `--merge` to return after successful CI verification. Reads have bounded retries for transient
+Omit `--merge` to return after successful CI verification. The delivery helper
+checks pending CI status once per minute. Reads have bounded retries for transient
 network/server errors. Writes are never blindly retried; an ambiguous creation
 or merge response is reconciled against the actual PR. The default follow-up
 deadline is one hour, adjustable with `--timeout` in seconds. A stale lock must

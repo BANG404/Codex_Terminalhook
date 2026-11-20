@@ -32,29 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", serde_json::json!({"worker_pid":pid}));
         return Ok(());
     }
-    if let Some(action @ ("--background-worker" | "--probe-host")) = action.as_deref() {
-        let argument = args.next().ok_or("missing command argument")?;
+    if action.as_deref() == Some("--background-worker") {
+        let path = args.next().ok_or("missing task directory")?;
         return tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
-            .block_on(async {
-                let result = if action == "--probe-host" {
-                    bridge::probe(&argument).await
-                } else {
-                    background::worker(std::path::Path::new(&argument))
-                        .await
-                        .map(|_| serde_json::Value::Null)
-                };
-                match result {
-                    Ok(value) => {
-                        if !value.is_null() {
-                            println!("{value}");
-                        }
-                        Ok(())
-                    }
-                    Err(error) => Err(error.into()),
-                }
-            });
+            .block_on(background::worker(std::path::Path::new(&path)))
+            .map_err(Into::into);
     }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
