@@ -1,0 +1,58 @@
+name: Source policy
+
+on:
+  workflow_call:
+    inputs:
+      alpha_refresh:
+        description: Require a manual source validation on the alpha branch
+        type: boolean
+        default: false
+      require_promotion_proof:
+        description: Locate successful alpha source validation for the current tree
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  policy:
+    name: Source and promotion policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require the alpha branch for a source refresh
+        if: inputs.alpha_refresh
+        run: test "$GITHUB_EVENT_NAME" = workflow_dispatch && test "$GITHUB_REF" = refs/heads/alpha
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the checkout identity
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Check promotion policy and metadata
+        run: |
+          python scripts/check_promotion.py
+          python scripts/check_metadata.py
+      - name: Reuse alpha source evidence
+        if: inputs.require_promotion_proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/verify_promotion.py
+      - name: Upload promotion evidence
+        if: inputs.require_promotion_proof
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: promotion-validation
+          path: artifacts/promotion-validation.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14

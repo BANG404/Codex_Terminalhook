@@ -59,11 +59,23 @@ class GitHub:
         return self.read_json("pr", "view", str(number), "--repo", REPOSITORY,
                               "--json", "reviewDecision")["reviewDecision"]
 
-    def package_report(self, run_id):
+    def source_report(self, run_id, attempt):
+        artifacts = self.pages(f"actions/runs/{run_id}/artifacts?name=source-validation&per_page=100", "artifacts")
+        source = [artifact for artifact in artifacts if artifact["name"] == "source-validation"]
+        if len(source) > 1 or (source and source[0].get("expired")):
+            raise ValueError("CI source-validation artifact is ambiguous or expired")
+        name, filename = ("source-validation", "source-validation.json") if source else (
+            "package-verification", "package-validation.json")
         with tempfile.TemporaryDirectory(prefix="terminalhook-delivery-proof-") as directory:
             self.gh("run", "download", str(run_id), "--repo", REPOSITORY,
-                    "--name", "package-verification", "--dir", directory)
-            return json.loads((Path(directory) / "package-validation.json").read_text(encoding="utf-8"))
+                    "--name", name, "--dir", directory)
+            report = json.loads((Path(directory) / filename).read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("CI source report must be a JSON object")
+        if source and (type(report.get("run_id")) is not int or report["run_id"] != run_id
+                       or type(report.get("run_attempt")) is not int or report["run_attempt"] != attempt):
+            raise ValueError("CI source report does not identify the latest verified run and attempt")
+        return report
 
 
 def validate_pr(pr, head, branch=None):
@@ -78,12 +90,10 @@ def validate_pr(pr, head, branch=None):
         raise ValueError("PR closed without merging; original source retained")
     if pr.get("draft"):
         raise ValueError("Draft PRs are not eligible for automatic delivery")
-    if not pr.get("merged") and pr.get("auto_merge"):
-        raise ValueError("Disable native auto-merge before following explicit CI gates")
     return pr["head"]["ref"]
 
 
-def check_progress(checks, head):
+def check_progress(checks, jobs, head, run_id, attempt):
     latest = {}
     for check in checks:
         if (check.get("name") not in REQUIRED_CHECKS or check.get("head_sha") != head
@@ -95,32 +105,46 @@ def check_progress(checks, head):
     for name in REQUIRED_CHECKS:
         check = latest.get(name)
         if not check:
-            return f"{name}: missing", None
+            return f"{name}: missing"
+        if not re.fullmatch(rf"https://github.com/{re.escape(REPOSITORY)}/actions/runs/{run_id}/job/\d+",
+                            check.get("details_url", "")):
+            return "Waiting for both required checks from the latest CI run"
+        job = next((job for job in jobs if job["name"] == name
+                    and job.get("check_run_url", "").endswith(f"/check-runs/{check['id']}")), None)
+        if not job:
+            return "Waiting for actual jobs from the latest CI attempt"
         if check["status"] != "completed":
-            return f"{name}: {check['status']}", None
+            return f"{name}: {check['status']}"
         if check.get("conclusion") != "success":
-            raise ValueError(f"{name}: {check.get('conclusion')}; inspect {check.get('html_url', '')}")
-    return "Actual CI checks succeeded", latest
+            raise ValueError(f"CI run {run_id}, attempt {attempt}: {name}: {check.get('conclusion')}; "
+                             f"inspect {check['details_url']}")
+        if job["status"] != "completed" or job["conclusion"] != "success":
+            return "Waiting for successful jobs from the latest CI attempt"
+    return None
+
+
+def first_failure(jobs):
+    failed = []
+    for job in jobs:
+        if job.get("conclusion") not in {"failure", "timed_out", "startup_failure"}:
+            continue
+        step = next((step for step in job.get("steps", []) if step.get("conclusion") == "failure"), {})
+        finished = step.get("completed_at") or job.get("completed_at")
+        failed.append((finished, job, step))
+    if not failed:
+        return ""
+    finished, job, step = min(failed, key=lambda item: item[0] or "9999")
+    name = f"{job['name']} / {step['name']}" if step else job["name"]
+    time_label = f" at {finished}" if finished else ""
+    return f"; first failed job: {name} ({job['conclusion']}){time_label} {job.get('html_url', '')}".rstrip()
 
 
 def ci_progress(hub, number, head, branch):
-    checks = hub.pages(f"commits/{head}/check-runs?filter=all&per_page=100", "check_runs")
-    status, selected = check_progress(checks, head)
-    if selected is None:
-        return status, None
-    run_ids = set()
-    for check in selected.values():
-        match = re.fullmatch(rf"https://github.com/{re.escape(REPOSITORY)}/actions/runs/(\d+)/job/\d+", check.get("details_url", ""))
-        if not match:
-            raise ValueError("Required check does not identify a repository Actions run")
-        run_ids.add(int(match[1]))
-    if len(run_ids) != 1:
-        return "Waiting for both required checks from one CI run", None
-    run_id = run_ids.pop()
     runs = hub.pages(f"actions/workflows/ci.yml/runs?event=pull_request&head_sha={head}&per_page=100", "workflow_runs")
     matching = [run for run in runs if run["head_sha"] == head and run["head_branch"] == branch]
-    if not matching or max(run["id"] for run in matching) != run_id:
-        return "Waiting for the latest CI run for the original source", None
+    if not matching:
+        return "Waiting for a CI run for the original source", None
+    run_id = max(run["id"] for run in matching)
     run = hub.api(f"actions/runs/{run_id}")
     if (run["head_sha"] != head or run["head_branch"] != branch or run["event"] != "pull_request"
             or run["path"] != ".github/workflows/ci.yml"
@@ -130,41 +154,46 @@ def ci_progress(hub, number, head, branch):
             pr["number"] == number and pr["head"]["sha"] == head and pr["base"]["ref"] == "alpha"
             for pr in run["pull_requests"]):
         raise ValueError("CI run belongs to a different PR")
-    if run["status"] != "completed":
-        return f"CI run {run_id}: {run['status']}", None
-    if run["conclusion"] != "success":
-        raise ValueError(f"CI run {run_id}: {run['conclusion']}")
     attempt = run["run_attempt"]
     jobs = hub.pages(f"actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100", "jobs")
-    for name, check in selected.items():
-        if not any(job["name"] == name and job["status"] == "completed" and job["conclusion"] == "success"
-                   and job.get("check_run_url", "").endswith(f"/check-runs/{check['id']}") for job in jobs):
-            return "Waiting for actual jobs from the latest CI attempt", None
-    return f"CI run {run_id}, attempt {attempt}: both required checks succeeded", run_id
+    label = f"CI run {run_id}, attempt {attempt}"
+    if run["status"] != "completed":
+        return f"{label}: {run['status']}{first_failure(jobs)}", None
+    if run["conclusion"] != "success":
+        url = f"https://github.com/{REPOSITORY}/actions/runs/{run_id}/attempts/{attempt}"
+        raise ValueError(f"{label}: {run['conclusion']}{first_failure(jobs)}; inspect {url}")
+    checks = hub.pages(f"commits/{head}/check-runs?filter=all&per_page=100", "check_runs")
+    pending = check_progress(checks, jobs, head, run_id, attempt)
+    if pending:
+        return f"{label}: {pending}", None
+    return f"{label}: both required checks succeeded", (run_id, attempt)
 
 
-def verify_merge(hub, pr, head, branch):
+def verify_merge(hub, pr, head, branch, tested, verified_base=None):
     validate_pr(pr, head, branch)
     if not pr.get("merged") or not SHA.fullmatch(pr.get("merge_commit_sha") or ""):
         raise ValueError("GitHub has not confirmed the merge")
     commit = hub.api("git/commits/" + pr["merge_commit_sha"])
-    if len(commit.get("parents", [])) != 2 or commit["parents"][1]["sha"] != head:
+    parents = commit.get("parents", [])
+    if len(parents) != 2 or parents[1]["sha"] != head:
         raise ValueError("Merged commit does not retain the expected source as its second parent")
+    if parents[0]["sha"] != verified_base:
+        verify_base_history(hub, tested, parents[0]["sha"])
     return {"pr": pr["html_url"], "head": head, "merge_commit": pr["merge_commit_sha"], "merged": True}
 
 
-def tested_base(hub, run_id, head):
+def tested_base(hub, ci, head):
     # The aggregate records the actual tested merge candidate, even when the
     # Actions run's pull_requests list is empty or alpha has since advanced.
-    report = hub.package_report(run_id)
+    report = hub.source_report(*ci)
     revision, tree = report.get("source_revision", ""), report.get("source_tree", "")
-    if report.get("passed") is not True or not SHA.fullmatch(revision) or not SHA.fullmatch(tree):
-        raise ValueError("CI package report lacks a successful tested source identity")
+    if report.get("passed") is not True or not all(isinstance(sha, str) and SHA.fullmatch(sha) for sha in (revision, tree)):
+        raise ValueError("CI source report lacks a successful tested source identity")
     commit = hub.api("git/commits/" + revision)
     parents = commit.get("parents", [])
     if (len(parents) != 2 or parents[1].get("sha") != head
             or not SHA.fullmatch(parents[0].get("sha", "")) or commit.get("tree", {}).get("sha") != tree):
-        raise ValueError("CI package report does not prove this PR HEAD and tested merge tree")
+        raise ValueError("CI source report does not prove this PR HEAD and tested merge tree")
     return parents[0]["sha"]
 
 
@@ -177,6 +206,54 @@ def verify_base_history(hub, tested, current):
             raise ValueError("Alpha history no longer contains the tested base; inspect the history rewrite")
 
 
+def merge_if_ready(hub, number, head, branch, ci):
+    decision = hub.reviews(number)
+    if decision == "CHANGES_REQUESTED":
+        raise ValueError("Changes requested; automatic merge stopped")
+    if decision == "REVIEW_REQUIRED":
+        return None
+
+    tested = tested_base(hub, ci, head)
+    _, current_ci = ci_progress(hub, number, head, branch)
+    if current_ci != ci or hub.reviews(number) in {"REVIEW_REQUIRED", "CHANGES_REQUESTED"}:
+        return None
+    # Detect a native queue or completed merge as close to the SHA-bound write as possible.
+    fresh = hub.api(f"pulls/{number}")
+    validate_pr(fresh, head, branch)
+    if fresh.get("merged"):
+        return verify_merge(hub, fresh, head, branch, tested)
+    if fresh.get("auto_merge"):
+        return None
+    if fresh.get("mergeable_state") == "behind":
+        raise ValueError("PR is behind alpha, not necessarily conflicted. Strict branch protection requires an update; "
+                         "retain this HEAD and CI. Source-based alpha delivery requires an explicitly approved "
+                         "non-strict status-check policy; this helper never changes protections or rewrites the source")
+    if fresh.get("mergeable") is not True or fresh.get("mergeable_state") not in {"clean", "unstable", "has_hooks"}:
+        return None
+    base = fresh["base"].get("sha")
+    verify_base_history(hub, tested, base)
+
+    run_id, attempt = ci
+    try:
+        result = hub.api(f"pulls/{number}/merge", {
+            "sha": head, "merge_method": "merge",
+            "commit_title": f"chore(delivery): merge verified alpha PR #{number}",
+            "commit_message": f"Source commit: {head}\nVerified CI run: {run_id}, attempt {attempt}\n",
+        }, method="PUT")
+        if result.get("merged") is not True:
+            raise RuntimeError("GitHub did not accept the SHA-bound merge")
+    except (RuntimeError, subprocess.TimeoutExpired):
+        # A response can be lost after acceptance. Reconcile without replaying the write.
+        observed = hub.api(f"pulls/{number}")
+        validate_pr(observed, head, branch)
+        if observed.get("merged"):
+            return verify_merge(hub, observed, head, branch, tested, base)
+        if observed.get("auto_merge"):
+            return None
+        raise
+    return verify_merge(hub, hub.api(f"pulls/{number}"), head, branch, tested, base)
+
+
 def follow(hub, number, head, timeout=3600, merge=False, pause=time.sleep, now=time.monotonic):
     deadline = now() + timeout
     branch = validate_pr(hub.api(f"pulls/{number}"), head)
@@ -184,47 +261,27 @@ def follow(hub, number, head, timeout=3600, merge=False, pause=time.sleep, now=t
     while now() < deadline:
         pr = hub.api(f"pulls/{number}")
         validate_pr(pr, head, branch)
-        if pr.get("merged"):
-            return verify_merge(hub, pr, head, branch)
-        if pr.get("mergeable") is False or pr.get("mergeable_state") == "dirty":
+        merged = pr.get("merged")
+        if not merged and (pr.get("mergeable") is False or pr.get("mergeable_state") == "dirty"):
             raise ValueError("PR has conflicts; resolve and verify a new source commit")
-        status, run_id = ci_progress(hub, number, head, branch)
+        status, ci = ci_progress(hub, number, head, branch)
+        queued = not merged and pr.get("auto_merge")
+        if merge and queued:
+            status += "; waiting for GitHub auto-merge"
         if status != previous:
             print(status, flush=True)
             previous = status
-        if run_id and merge:
-            decision = hub.reviews(number)
-            if decision == "CHANGES_REQUESTED":
-                raise ValueError("Changes requested; automatic merge stopped")
-            if decision != "REVIEW_REQUIRED":
-                # Re-read identity and actual gates immediately before the SHA-bound write.
-                fresh = hub.api(f"pulls/{number}")
-                validate_pr(fresh, head, branch)
-                if fresh.get("merged"):
-                    return verify_merge(hub, fresh, head, branch)
-                if fresh.get("mergeable_state") == "behind":
-                    raise ValueError("PR is behind alpha, not necessarily conflicted. Strict branch protection requires an update; "
-                                     "retain this HEAD and CI. Source-based alpha delivery requires an explicitly approved "
-                                     "non-strict status-check policy; this helper never changes protections or rewrites the source")
-                eligible = fresh.get("mergeable") is True and fresh.get("mergeable_state") in {"clean", "unstable", "has_hooks"}
-                _, fresh_run = ci_progress(hub, number, head, branch)
-                if eligible and fresh_run == run_id and hub.reviews(number) not in {"REVIEW_REQUIRED", "CHANGES_REQUESTED"}:
-                    verify_base_history(hub, tested_base(hub, run_id, head), fresh["base"].get("sha"))
-                    try:
-                        result = hub.api(f"pulls/{number}/merge", {
-                            "sha": head, "merge_method": "merge",
-                            "commit_title": f"chore(delivery): merge verified alpha PR #{number}",
-                            "commit_message": f"Source commit: {head}\nVerified CI run: {run_id}\n",
-                        }, method="PUT")
-                        if result.get("merged") is not True:
-                            raise RuntimeError("GitHub did not accept the SHA-bound merge")
-                    except (RuntimeError, subprocess.TimeoutExpired):
-                        # A response can be lost after acceptance. Reconcile; never retry the write.
-                        observed = hub.api(f"pulls/{number}")
-                        if observed.get("merged"):
-                            return verify_merge(hub, observed, head, branch)
-                        raise
-                    return verify_merge(hub, hub.api(f"pulls/{number}"), head, branch)
+        if ci and (merged or not merge):
+            tested = tested_base(hub, ci, head)
+            if merged:
+                return verify_merge(hub, pr, head, branch, tested)
+            verify_base_history(hub, tested, pr["base"].get("sha"))
+            run_id, attempt = ci
+            return {"pr": pr["html_url"], "head": head, "run_id": run_id, "run_attempt": attempt, "merged": False}
+        if ci and not queued:
+            result = merge_if_ready(hub, number, head, branch, ci)
+            if result:
+                return result
         pause(min(15, max(0, deadline - now())))
     raise TimeoutError(f"Timed out; retain PR #{number} and resume follow for HEAD {head}")
 
