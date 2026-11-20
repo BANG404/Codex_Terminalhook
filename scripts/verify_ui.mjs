@@ -115,7 +115,21 @@ try {
       args: [
         "-u",
         "-c",
-        "import time; print('Build started'); time.sleep(3); print('<img src=x onerror=alert(1)>'); print('Build finished 中文')",
+        [
+          "import time",
+          "print('Checking workspace')",
+          "time.sleep(3)",
+          "print('\\ncomponents/tasks.ts')",
+          "print('  14:7  error  Assigned value is never used')",
+          "print('\\ncomponents/TaskTerminal.svelte')",
+          "print('  42:5  error  Expected a stable key')",
+          "print('\\n✖ 2 problems (2 errors, 0 warnings)')",
+          "print('\\nChecks failed with exit code 1.')",
+          "print('a' * 240)",
+          "print('<img src=x onerror=alert(1)>')",
+          "print('Build failed 中文')",
+          "raise SystemExit(1)",
+        ].join("\n"),
       ],
       cwd: root,
     })
@@ -142,7 +156,7 @@ try {
     if (requestId != null) child.stdin.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/cancelled",params:{requestId}})+"\n");
   });
   await page.setContent(
-    '<style>body{margin:0;background:#eef0f4;padding:18px}iframe{width:100%;height:800px;border:0;border-radius:14px}</style><iframe title="TerminalHook task dashboard"></iframe>',
+    '<style>body{margin:0;background:#fff;padding:18px}iframe{width:100%;height:800px;border:0;border-radius:14px}</style><iframe title="TerminalHook task dashboard"></iframe>',
   );
   await page.evaluate((submitted) => {
     window.hostCalls = [];
@@ -219,13 +233,40 @@ try {
   assert.equal(await frame.locator(".task-list, .task-row, [role=tab], input, header, h1, select, [role=switch]").count(), 0);
   assert.equal(await frame.locator("html").getAttribute("lang"), "en");
   // Native state/result events must update this task without list reads.
-  await frame.locator(".task-badges .status-badge").filter({hasText: "completed"}).waitFor();
-  await frame.locator("#detail pre").filter({hasText: "Build finished"}).waitFor();
+  await frame.locator(".task-badges .status-badge").filter({hasText: "failed"}).waitFor();
+  const terminal = frame.locator("[data-slot=trace]");
+  const terminalTrigger = terminal.getByRole("button", { name: /exited with code 1$/ });
+  const codeBlock = terminal.locator("[data-slot=code-block]");
+  const outputRegion = frame.getByRole("region", { name: "Output", exact: true });
+  const outputText = outputRegion.locator("[data-slot=code-block-code]");
+  await outputText.filter({hasText: "Build failed 中文"}).waitFor();
   await frame.getByLabel("Delivery: delivered", {exact: true}).waitFor();
   const actual = (await tool("get_task", { task_id: submitted.task_id })).structuredContent;
-  assert.equal(actual.status, "completed");
-  assert.equal(await frame.locator("#detail pre img").count(), 0);
-  assert.match(await frame.locator("#detail pre").innerText(), /<img src=x onerror=alert\(1\)>/);
+  assert.equal(actual.status, "failed");
+  assert.equal(actual.result.exit_code, 1);
+  assert.equal(await terminalTrigger.locator("[data-slot=trace-line]").getAttribute("data-status"), "error");
+  assert.equal(await outputText.locator("img").count(), 0);
+  assert.match(await outputText.innerText(), /<img src=x onerror=alert\(1\)>/);
+  assert.equal(await frame.locator("#detail").getAttribute("data-slot"), "scroll-area-viewport");
+  assert.equal(await outputRegion.getAttribute("data-slot"), "scroll-area-viewport");
+  assert.equal(await outputRegion.evaluate(el => getComputedStyle(el).scrollbarWidth), "none");
+  await terminalTrigger.press("Enter");
+  await outputRegion.waitFor({ state: "hidden" });
+  assert.equal(await terminalTrigger.getAttribute("aria-expanded"), "false");
+  await terminalTrigger.press("Enter");
+  await outputRegion.waitFor();
+  assert.equal(await terminalTrigger.getAttribute("aria-expanded"), "true");
+  await terminal.locator("[data-slot=scroll-area-thumb]").waitFor();
+  await outputRegion.press("End");
+  const appFrame = page.frame({ url: "about:srcdoc" });
+  await appFrame.waitForFunction(() => {
+    const viewport = document.querySelector("[data-slot=scroll-area-viewport][aria-label=Output]");
+    return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
+  });
+  await outputRegion.press("Home");
+  await appFrame.waitForFunction(
+    () => document.querySelector("[data-slot=scroll-area-viewport][aria-label=Output]").scrollTop === 0,
+  );
   await frame.getByRole("button", { name: "Details", exact: true }).click();
   await frame.getByText("No deadline", { exact: true }).waitFor();
   await frame.getByRole("button", { name: "Details", exact: true }).click();
@@ -252,29 +293,45 @@ try {
   });
   await notify({ structuredContent: actual });
   assert.equal(await page.evaluate(() => window.toolCalls.length), callsAfterRenewal);
-  await frame.locator("#detail pre").filter({hasText: "Build finished"}).waitFor();
+  await outputText.filter({hasText: "Build failed 中文"}).waitFor();
   assert.equal(await frame.getByText("unrelated-task", {exact: true}).count(), 0);
   assert.ok((await page.evaluate(() => window.toolArgs)).every(args => args.task_id === submitted.task_id));
   assert.ok(!(await page.evaluate(() => window.toolCalls)).includes("list_tasks"));
   const desktopSize = await frame.locator("main").boundingBox();
   assert.ok(desktopSize.height <= 340, `desktop height: ${desktopSize.height}`);
+  const terminalLayout = await codeBlock.evaluate(block => {
+    const detail = block.closest("#detail");
+    const panelRight = detail.getBoundingClientRect().right - parseFloat(getComputedStyle(detail).paddingRight);
+    return {
+      rightGap: panelRight - block.getBoundingClientRect().right,
+      leftBorder: getComputedStyle(block.parentElement).borderLeftWidth,
+    };
+  });
+  assert.ok(Math.abs(terminalLayout.rightGap) < 1, `terminal right gap: ${terminalLayout.rightGap}`);
+  assert.equal(terminalLayout.leftBorder, "0px");
+  const lightBlockColor = await codeBlock.evaluate(el => getComputedStyle(el).backgroundColor);
   await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard.png")});
-  await page.evaluate(() => document.querySelector("iframe").contentWindow.postMessage({
-    jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: {theme: "dark"},
-  }, "*"));
+  await page.evaluate(() => {
+    document.body.style.backgroundColor = "#191b1e";
+    document.querySelector("iframe").contentWindow.postMessage({
+      jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: {theme: "dark"},
+    }, "*");
+  });
   await frame.locator("html.dark").waitFor();
+  assert.notEqual(await codeBlock.evaluate(el => getComputedStyle(el).backgroundColor), lightBlockColor);
   await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard-dark.png")});
   await page.setViewportSize({ width: 360, height: 800 });
   const mobileSize = await frame.locator("main").boundingBox();
   assert.ok(mobileSize.height <= 340, `mobile height: ${mobileSize.height}`);
   assert.ok(mobileSize.width <= 324, `mobile width: ${mobileSize.width}`);
   assert.ok(await frame.locator("body").evaluate(body => body.scrollWidth <= body.clientWidth));
+  assert.ok(await outputRegion.evaluate(el => el.scrollWidth <= el.clientWidth));
   await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard-mobile.png")});
   await page.evaluate(() => document.querySelector("iframe").contentWindow.postMessage({
     jsonrpc: "2.0", id: 998, method: "ui/resource-teardown", params: {},
   }, "*"));
   const callsAtTeardown = await page.evaluate(() => window.toolCalls.length);
-  await notify({ structuredContent: {...actual, status: "failed"} });
+  await notify({ structuredContent: {...actual, status: "completed"} });
   assert.equal(await page.evaluate(() => window.toolCalls.length), callsAtTeardown);
   assert.equal(requests.filter(url => /^https?:/.test(url)).length, 0);
   assert.deepEqual(errors, []);
@@ -307,6 +364,10 @@ try {
     compact_desktop_height: desktopSize.height,
     compact_mobile_height: mobileSize.height,
     output_escaped: true,
+    terminal_trace_failed_exit: true,
+    terminal_trace_collapses_with_keyboard: true,
+    terminal_fills_available_width_without_guide: true,
+    output_component_scrollbar_and_keyboard: true,
     external_requests: 0,
     model_messages: 0,
     host: "Playwright MCP Apps bridge simulation; not native desktop rendering",
