@@ -10,11 +10,13 @@ import zipfile
 PLATFORMS = ("windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64")
 CHANNELS = {"production": "marketplace", "alpha": "marketplace-alpha",
             "beta": "marketplace-beta", "rc": "marketplace-rc"}
+PLUGIN_ICON = "assets/terminalhook-logo.svg"
 COMMON_FILES = {
     ".agents/plugins/marketplace.json", "build-info.json", "platform.json", "LICENSE",
     "README.md", "README.zh-CN.md", "install.ps1", "Enable-DirectTools.ps1",
     "install.py", "install.sh", "distribution.py", "Start-DesktopSharedHost.ps1",
     "plugins/terminalhook/.codex-plugin/plugin.json", "plugins/terminalhook/.mcp.json",
+    "plugins/terminalhook/" + PLUGIN_ICON,
     "plugins/terminalhook/skills/terminal-wait/SKILL.md",
     "plugins/terminalhook/skills/terminal-wait/scripts/Initialize-Utf8.ps1",
 }
@@ -98,6 +100,9 @@ def package_files(archive, info, target="windows-x64"):
     manifest = json.loads(files["plugins/terminalhook/.codex-plugin/plugin.json"])
     if manifest["name"] != "terminalhook" or manifest["version"] != info["version"] or "hooks" in manifest:
         raise ValueError("Packaged plugin identity differs")
+    interface = manifest.get("interface", {})
+    if any(interface.get(field) != "./" + PLUGIN_ICON for field in ("logo", "composerIcon")):
+        raise ValueError("Packaged plugin icon paths differ")
     catalog = json.loads(files[".agents/plugins/marketplace.json"])
     if (catalog["name"] != "terminalhook-local" or len(catalog["plugins"]) != 1
             or catalog["plugins"][0]["name"] != "terminalhook"
