@@ -479,8 +479,12 @@ class BackgroundTests(unittest.TestCase):
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
         self.assertEqual(state["status"], "failed")
         self.assertIn("65536", state["result"]["message"])
-        job = self.submit("import sys; sys.stdout.write('x'*70000); print('READY',file=sys.stderr)",
-                          streams=["stderr"], until=[{"name": "ready", "pattern": "READY"}])
+        # Keep the command running so a match can stop it before natural exit.
+        job = self.submit(
+            "import sys, threading; sys.stdout.write('x'*70000); "
+            "print('READY', file=sys.stderr); threading.Event().wait()",
+            streams=["stderr"], until=[{"name": "ready", "pattern": "READY"}],
+        )
         state = self.await_state(job, lambda s: s["delivery"] == "delivered")
         self.assertEqual(state["result"]["status"], "matched", state["result"])
 
