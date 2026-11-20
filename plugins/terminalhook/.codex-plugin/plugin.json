@@ -8,6 +8,8 @@
     "displayName": "TerminalHook",
     "shortDescription": "Run background tasks with native event delivery",
     "longDescription": "Run long commands and waits of unpredictable duration in the background, receive saved results in the original chat, and inspect the event-driven task dashboard. Independent workers survive MCP disconnection.",
-    "category": "Developer Tools"
+    "category": "Developer Tools",
+    "logo": "./assets/terminalhook-logo.svg",
+    "composerIcon": "./assets/terminalhook-logo.svg"
   }
 }

@@ -222,6 +222,10 @@ exit code, working directory, and bounded live or saved output. The interface us
 English; task names and output retain their original text. `list_tasks` remains
 available for explicit chat-wide inspection and does not open a panel.
 
+TerminalHook supplies its [project logo](../plugins/terminalhook/assets/terminalhook-logo.svg)
+through the plugin manifest and the MCP server and panel-opening tools. The host
+chooses the icon it shows in the conversation's panel header.
+
 The Svelte view uses [shadcn-svelte](https://www.shadcn-svelte.com/) components.
 There is no task list, search, or status filter. Details expands task identifiers,
 deadlines, and delivery receipts. Output uses the shadcn-svelte
