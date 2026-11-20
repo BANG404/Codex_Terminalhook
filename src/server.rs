@@ -114,7 +114,10 @@ impl TerminalHook {
 impl ServerHandler for TerminalHook {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().enable_extensions_with(serde_json::from_value(json!({"io.modelcontextprotocol/ui":{"mimeTypes":[crate::ui::MIME]}})).unwrap()).build())
-            .with_server_info(Implementation::new("terminalhook", env!("TERMINALHOOK_VERSION")))
+            .with_server_info(
+                Implementation::new("terminalhook", env!("TERMINALHOOK_VERSION"))
+                    .with_icons(vec![crate::ui::logo()]),
+            )
             .with_instructions("Proactively use TerminalHook for commands within the user's task that are expected to take a long time or may wait for an unpredictable duration, such as waiting for CI or a deployment to finish. The user's task request is sufficient to choose background execution. Call check_background before the first submission to verify the existing shared host. Submit once with submit_task and a stable task_key, then end the turn and await completion delivery to this chat. Omit until to wait for natural exit. Leave timeout_ms unset and run the native wait command without an added shell or watcher deadline unless the user or the operation explicitly requires a finite deadline. The MCP request timeout applies to the submission call. The worker's lifetime is independent of it. Do not poll get_task or list_tasks, replay submissions, or start another daemon. Use get_task for diagnosis, cancel_task for explicit cancellation, and retry_delivery only for a saved result whose delivery failed before submission. Uncertain delivery requires reconciliation. Use the host terminal for quick or interactive commands. This package uses native events and existing-daemon callbacks without lifecycle hooks.")
     }
 

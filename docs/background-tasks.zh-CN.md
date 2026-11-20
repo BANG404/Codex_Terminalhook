@@ -191,6 +191,10 @@ MCP 断连不会停止已提交的后台 worker；删除状态前应明确取消
 界面统一使用英语；任务名称和输出保留原始文本。`list_tasks` 仍可用于明确请求的聊天任务查询，
 但不打开面板。
 
+TerminalHook 通过插件清单、MCP 服务端和打开面板的工具提供同一个
+[项目 Logo](../plugins/terminalhook/assets/terminalhook-logo.svg)。
+聊天中面板标题栏显示的图标由宿主决定。
+
 Svelte 界面使用 [shadcn-svelte](https://www.shadcn-svelte.com/) 组件，
 不提供任务列表、搜索或状态筛选。点击 **Details** 展开任务标识、期限和交付回执。
 输出区使用 shadcn-svelte 的 [Terminal 模式](https://shadcn-svelte.com/docs/ai-elements/terminal)。

@@ -58,6 +58,20 @@ class DistributionTests(unittest.TestCase):
                 with self.subTest(target=target, name=name), self.assertRaises(ValueError):
                     dist.package_files(archive_data(files), self.info, target)
 
+    def test_package_requires_the_logo_and_both_manifest_references(self):
+        files = package_data(self.info)
+        missing_logo = dict(files)
+        del missing_logo["plugins/terminalhook/" + dist.PLUGIN_ICON]
+        with self.assertRaisesRegex(ValueError, "missing"):
+            dist.package_files(archive_data(missing_logo), self.info)
+
+        manifest_path = "plugins/terminalhook/.codex-plugin/plugin.json"
+        manifest = json.loads(files[manifest_path])
+        del manifest["interface"]["composerIcon"]
+        files[manifest_path] = json.dumps(manifest).encode()
+        with self.assertRaisesRegex(ValueError, "icon paths differ"):
+            dist.package_files(archive_data(files), self.info)
+
     def test_zip_traversal_symlinks_and_missing_execute_bits_are_rejected(self):
         import io
         for name, mode in (("../escape", 0o100644), ("/absolute", 0o100644), ("C:/escape", 0o100644), ("link", 0o120777)):
