@@ -241,7 +241,8 @@ There is no task list, search, or status filter. Details expands task identifier
 deadlines, and delivery receipts. Output uses the shadcn-svelte
 [Terminal pattern](https://shadcn-svelte.com/docs/ai-elements/terminal).
 The command row highlights failures and toggles an indented Code Block that
-starts open, follows the host theme, and wraps long lines.
+starts open and fills the available panel width. The code block follows the
+host theme and wraps long lines.
 Both the details and command output use `ScrollArea`. Focus the Output region
 to scroll it with the keyboard. The surrounding panel follows the host theme
 and requests that the host hide the MCP Apps frame.

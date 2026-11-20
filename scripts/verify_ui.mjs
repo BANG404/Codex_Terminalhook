@@ -299,6 +299,16 @@ try {
   assert.ok(!(await page.evaluate(() => window.toolCalls)).includes("list_tasks"));
   const desktopSize = await frame.locator("main").boundingBox();
   assert.ok(desktopSize.height <= 340, `desktop height: ${desktopSize.height}`);
+  const terminalLayout = await codeBlock.evaluate(block => {
+    const detail = block.closest("#detail");
+    const panelRight = detail.getBoundingClientRect().right - parseFloat(getComputedStyle(detail).paddingRight);
+    return {
+      rightGap: panelRight - block.getBoundingClientRect().right,
+      leftBorder: getComputedStyle(block.parentElement).borderLeftWidth,
+    };
+  });
+  assert.ok(Math.abs(terminalLayout.rightGap) < 1, `terminal right gap: ${terminalLayout.rightGap}`);
+  assert.equal(terminalLayout.leftBorder, "0px");
   const lightBlockColor = await codeBlock.evaluate(el => getComputedStyle(el).backgroundColor);
   await frame.locator("main").screenshot({path: path.join(root, "artifacts/task-dashboard.png")});
   await page.evaluate(() => {
@@ -356,6 +366,7 @@ try {
     output_escaped: true,
     terminal_trace_failed_exit: true,
     terminal_trace_collapses_with_keyboard: true,
+    terminal_fills_available_width_without_guide: true,
     output_component_scrollbar_and_keyboard: true,
     external_requests: 0,
     model_messages: 0,

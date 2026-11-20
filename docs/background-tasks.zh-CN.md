@@ -195,7 +195,7 @@ Svelte 界面使用 [shadcn-svelte](https://www.shadcn-svelte.com/) 组件，
 不提供任务列表、搜索或状态筛选。点击“详情”展开任务标识、期限和交付回执。
 输出区使用 shadcn-svelte 的 [Terminal 模式](https://shadcn-svelte.com/docs/ai-elements/terminal)。
 命令行以红色标出失败状态，点击可折叠或展开缩进的 Code Block。
-代码块默认展开，跟随宿主主题，长行会自动换行。
+代码块默认展开，宽度随面板自适应，并跟随宿主主题。长行会自动换行。
 详情区和命令输出均使用 `ScrollArea`。将焦点移到 Output 区域后，可以用键盘滚动。
 外围面板跟随宿主主题，并请求宿主隐藏 MCP Apps 外框。
 
