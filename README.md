@@ -19,10 +19,30 @@ Windows Job Objects and Unix process groups contain command descendants.
 
 Use the host terminal for quick or interactive commands.
 
-[Installation](#installation-and-upgrades) · [Task tools](#task-tools) ·
-[Task panel preview](docs/background-tasks.md#task-panel-preview) ·
+[Task panel preview](#task-panel-preview) · [Installation](#installation-and-upgrades) ·
+[Task tools](#task-tools) ·
 [Releases](https://github.com/BANG404/Codex_Terminalhook/releases) ·
 [Development and releases](docs/releasing.md)
+
+## Task panel preview
+
+In a compatible MCP Apps host, the task panel shows execution and delivery
+status, the exit code, and command output. These screenshots were captured in
+a browser test host.
+
+**Running**
+
+![Light task panel showing running, pending delivery, and partial command output](docs/assets/task-panel-running.png)
+
+**Completed**
+
+![Light task panel showing completed, exit code 0, and delivered](docs/assets/task-panel-completed.png)
+
+**Failed**
+
+![Dark task panel showing failed, exit code 1, and delivered](docs/assets/task-panel-failed.png)
+
+[Background task guide](docs/background-tasks.md#task-panel-preview)
 
 ## Installation and upgrades
 

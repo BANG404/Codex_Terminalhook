@@ -16,7 +16,26 @@ TerminalHook 是 Rust MCP 服务和 Codex 插件，用于持久后台命令、�
 
 快速或交互式命令请使用宿主终端。
 
-[安装](#安装与升级) · [任务工具](#任务工具) · [任务面板预览](docs/background-tasks.zh-CN.md#任务面板预览) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
+[任务面板预览](#任务面板预览) · [安装](#安装与升级) · [任务工具](#任务工具) · [发布版本](https://github.com/BANG404/Codex_Terminalhook/releases) · [开发与发布](docs/releasing.zh-CN.md)
+
+## 任务面板预览
+
+在兼容 MCP Apps 的宿主中，任务面板会显示执行状态、交付状态、退出码和命令输出。
+以下截图取自浏览器测试宿主。
+
+**运行中**
+
+![浅色面板显示任务正在运行、等待交付，以及当前命令输出](docs/assets/task-panel-running.png)
+
+**成功完成**
+
+![浅色面板显示任务已完成、退出码为 0，结果已交付](docs/assets/task-panel-completed.png)
+
+**执行失败**
+
+![深色面板显示任务执行失败、退出码为 1，结果已交付](docs/assets/task-panel-failed.png)
+
+[后台任务指南](docs/background-tasks.zh-CN.md#任务面板预览)
 
 ## 安装与升级
 
