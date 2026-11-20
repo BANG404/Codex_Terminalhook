@@ -27,36 +27,86 @@ workflow below; use the host terminal for foreground or interactive commands.
 
 ## Installation and upgrades
 
-TerminalHook is distributed as a Git marketplace containing the native binary, MCP configuration, and runtime skill. Installers select the current OS and architecture. Windows retains `marketplace` and `marketplace-alpha/beta/rc`; Unix branches append `-linux-x64`, `-linux-arm64`, `-macos-x64`, or `-macos-arm64` to the channel branch. Each platform/channel becomes available after its first published Release workflow run. Source branches contain no compiled binaries and must not be installed as binary marketplaces.
+### Install the stable version
 
-Development follows the `alpha → beta → rc → main` stage branches. Changes go through PRs: `alpha` receives full validation, and later promotions compare source trees and reuse the original verification artifacts, avoiding duplicate push and PR runs. Conventional Commits since the applicable stable release determine a shared target version; alpha/beta/rc add their channel, commit count and source SHA, while production uses the target without a suffix. Publication is triggered manually through the Release workflow. See [Development, CI/CD, and stage releases](docs/releasing.md). The project uses the [MIT license](LICENSE).
+Have Git and the Codex CLI on PATH. Use PowerShell 7 on Windows x64 or Python
+3.11+ on Linux and macOS. The installer selects the prebuilt Git marketplace for
+your OS and architecture. The installed MCP binary runs without Rust, Python, or Node.
 
-Development tasks automatically submit an alpha PR and merge it after the actual current-source CI succeeds, using `scripts/deliver.py` and the repository's [task completion rules](AGENTS.md). This does not promote later stages or publish a release. See [automatic alpha delivery](docs/releasing.md#task-completion-and-automatic-alpha-delivery).
-
-From a source checkout, install the Git distribution without building Rust:
-
-```powershell
-pwsh -NoProfile -File scripts/install.ps1
-# Optional: follow a preview channel instead of stable.
-pwsh -NoProfile -File scripts/install.ps1 -Channel beta
-```
-
-On Linux or macOS, use the POSIX launcher (Python 3.11+ is required for installation):
+Get the installer scripts and enter the checkout.
 
 ```sh
-sh scripts/install.sh
-sh scripts/install.sh --channel alpha
+git clone --depth 1 --branch main https://github.com/BANG404/Codex_Terminalhook.git
+cd Codex_Terminalhook
 ```
 
-The installer registers the Git marketplace, installs and enables the plugin, and configures native direct calls. Existing local installations migrate while retaining `terminalhook@terminalhook-local` and other user settings. The marketplace name retains its historical `-local` suffix for compatibility; the source is Git. A failed marketplace registration restores the previous source and tracking ref. Plugin installation requires Codex CLI, plus Git for Git installations. Windows uses PowerShell 7; Linux/macOS installation uses Python 3.11+. Running the installed MCP binary requires no Rust, Python, or Node.
+From the checkout root, run the installer for your platform.
 
-Codex's own startup tasks refresh configured Git marketplaces and their installed plugin caches. To request a refresh explicitly:
+**Windows**
 
 ```powershell
+pwsh -NoProfile -File scripts/install.ps1 -Channel production
+```
+
+**Linux and macOS**
+
+```sh
+sh scripts/install.sh --channel production
+```
+
+The installer registers the binary marketplace, installs and enables
+`terminalhook@terminalhook-local`, and configures direct tool calls. It retains
+the plugin ID and user settings when migrating a local install. If registration
+fails during migration, it attempts to restore the previous source and tracking
+ref. The checkout supplies the installer scripts. The marketplace supplies the
+binary, MCP configuration, and runtime skill.
+
+### Verify background access
+
+Open a new Codex chat and ask Codex to call `mcp__terminalhook.check_background`
+with `{}`. A response containing `"status": "ready"` confirms that TerminalHook
+can reach the shared App Server and locate that chat.
+
+If the check fails because Windows or macOS Desktop uses stdio without a shared
+endpoint, quit Desktop. In an external terminal, enter the matching extracted
+Release ZIP directory or the `terminalhook-local` Git marketplace root shown by
+`codex plugin marketplace list`. Run the launcher for your platform.
+
+| Platform | Launcher |
+| --- | --- |
+| Windows | `pwsh -NoProfile -File ./Start-DesktopSharedHost.ps1` |
+| macOS | `sh ./Start-DesktopSharedHost.sh` |
+
+Open or reopen the chat in the Desktop session started by the launcher, then run
+`check_background` again before submitting work. If the check still fails, use
+the host terminal for commands. See the [background host troubleshooting guide](docs/background-tasks.md#connection-diagnostics-and-desktop-compatibility).
+
+### Upgrade and migrate settings
+
+Codex refreshes configured Git marketplaces and installed plugin caches on
+startup. To refresh the currently tracked channel manually, run the following
+command.
+
+```sh
 codex plugin marketplace upgrade terminalhook-local
 ```
 
-Updates follow the selected branch, not GitHub's latest-release API. There is no custom background updater or guaranteed polling interval while the app stays open. Open a new Codex chat after an update. Existing chats retain their loaded tool catalog; durable background workers continue independently. See the [official marketplace commands](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace).
+The update follows the configured Git branch. To apply the current host
+settings to an older installation, run the installer from an up-to-date
+checkout with the same channel (`-Channel` on Windows, `--channel` on
+Linux/macOS). For a local installation,
+pass its package directory with `-Source` or `--source`. The installer adds
+`mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces` and
+sets `approval_mode = "approve"` for `submit_task` when neither that tool nor
+its TerminalHook server already has an approval mode. Open a new chat after
+updating or migrating and run `check_background` again. Existing chats retain
+their loaded tool catalog, and durable workers continue independently.
+[Codex marketplace commands](https://learn.chatgpt.com/docs/developer-commands#codex-plugin-marketplace)
+
+To switch to a published preview channel, pass `alpha`, `beta`, or `rc` to the
+installer's channel option. See [release channels and marketplace branches](docs/releasing.md#cd--manual-publication).
+
+### Offline installation and local development
 
 For offline installation or local development, download the ZIP matching your OS/architecture from [GitHub Releases](https://github.com/BANG404/Codex_Terminalhook/releases), extract it to a permanent directory, and run `pwsh -NoProfile -File ./install.ps1 -Source .` on Windows or `sh ./install.sh --source .` on Linux/macOS. Use an extractor that preserves executable permissions, such as `unzip` on Unix. Without a local source option the installer selects Git stable. CI preview ZIPs are also available in [Actions artifacts](https://github.com/BANG404/Codex_Terminalhook/actions).
 
@@ -69,11 +119,16 @@ pwsh -NoProfile -File scripts/install.ps1 -Source ./dist/package
 
 On Linux/macOS, build with `python3 scripts/package.py --channel development`, then install with `sh scripts/install.sh --source ./dist/package`. Native source builds require the pinned Rust toolchain, Python 3.11+, and Node.js 20.19+ or 22.12+ with npm to bundle the Svelte dashboard. Linux binaries use glibc (built on Ubuntu 24.04); Alpine/musl and Windows ARM64 are not release targets. macOS artifacts are unsigned and not notarized.
 
-`package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. Local installations require the directory to stay available and the installer to be rerun after local changes; they do not download remote updates. In both modes, the installer uses the standard `codex plugin marketplace add` and `codex plugin add` commands and Codex's configuration editing interface to preserve existing settings and add `mcp__terminalhook` to `features.code_mode.direct_only_tool_namespaces`. This administration does not send model requests.
+`package.ps1` generates the ZIP and `dist/SHA256SUMS.txt`. Keep the local package
+directory available and rerun the installer after local changes.
 
-The installer sets `approval_mode = "approve"` for `submit_task` when the user has not configured an approval mode for that tool or its TerminalHook server. The standalone example in `examples/standalone.config.toml` includes the same tool setting. Choose either standalone MCP or the plugin to avoid duplicate tools. Enablement in a project's `.codex/config.toml` only applies to trusted projects and does not replace installation. MCP commands use the local account's OS permissions and do not inherit the per-command sandbox of Codex's built-in shell.
+The [standalone MCP example](examples/standalone.config.toml) includes the same
+approval default. Enable one integration per chat to avoid duplicate tools.
+Enablement in a project's `.codex/config.toml` applies to trusted projects with
+the plugin already installed. MCP commands use the local account's OS
+permissions and run outside the per-command sandbox of Codex's built-in shell.
 
-To uninstall:
+### Uninstall
 
 ```powershell
 codex plugin remove terminalhook@terminalhook-local
@@ -106,8 +161,8 @@ is sufficient to choose background execution. Before the first submission,
 call `check_background`. A reachable shared Codex daemon, CLI proxy and
 host-provided `threadId` metadata are required; TerminalHook never guesses a chat
 ID or starts another daemon during preflight. A stdio-only host with no shared
-endpoint cannot submit background work. Windows Desktop has an optional shared
-host launcher described in the [background guide](docs/background-tasks.md).
+endpoint cannot submit background work. See [Verify background access](#verify-background-access)
+for the Windows and macOS Desktop launchers.
 
 The following example submits a build.
 
