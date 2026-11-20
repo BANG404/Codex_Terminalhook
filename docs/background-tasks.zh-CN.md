@@ -129,11 +129,11 @@ Unix 下的 `submit_task` 参数示例，Windows 应改用本机程序和路径�
 稳定的 `task_key` 在同一聊天中唯一：参数相同的重复提交返回已有任务，参数不同则拒绝。
 提交失败或被中断后，应先核查原任务，再决定是否使用新键。
 
-`timeout_ms` 可省略或设为 `null`，表示无执行期限；有限期限接受
-1–31536000000 毫秒（一年）。它属于 worker，独立于 660 秒的 MCP 请求超时，
-不受单次 MCP 工具调用时限约束。
-无执行期限时，worker 等待命中、退出、主动取消或 worker/宿主故障；
-不代表能够跨越重启或断电恢复执行。
+等待 CI、构建或部署时，默认省略 `until` 和 `timeout_ms`，由原生等待命令在操作结束时退出。
+对于 GitHub Actions，使用 `gh run watch <run-id> --repo <owner/repo> --exit-status`。
+只有用户或操作明确要求时，才为 worker、Shell 或等待命令设置有限期限。
+`timeout_ms` 接受 1–31536000000 毫秒（一年）。省略或设为 `null` 时，worker 没有执行期限。
+MCP 请求超时只约束提交调用。worker 独立运行，在命中、退出、主动取消或运行环境发生故障时停止。
 
 省略 `until` 或使用 `[]` 表示等待自然退出。
 可选 `until`、`streams`、`match_mode` 使用终端工具原有正则规则。

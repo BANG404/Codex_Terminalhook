@@ -158,11 +158,14 @@ model turn and await the result; do not keep querying `get_task`. A stable
 returns the existing task; different arguments are rejected. A failed or
 interrupted submission must be inspected before choosing a new key.
 
-`timeout_ms` is optional. Omit it or use `null` for no execution deadline; finite
-deadlines accept 1–31536000000 milliseconds (one year). This deadline belongs to
-the worker, independently of the 660-second MCP request timeout. No execution deadline means the worker
-waits until a match, exit, cancellation, or worker/host failure; it is not a
-guarantee of surviving a reboot or power loss.
+For CI, builds, and deployments, omit both `until` and `timeout_ms` by default
+and let the native wait command exit on completion. For GitHub Actions, use
+`gh run watch <run-id> --repo <owner/repo> --exit-status`. Add a finite worker,
+shell, or watcher deadline only when the user or the operation explicitly
+requires one. A finite `timeout_ms` accepts 1–31536000000 milliseconds (one
+year). Omission or `null` leaves the worker without an execution deadline.
+The MCP request timeout governs the submission call. The worker runs
+independently until a match, exit, cancellation, or worker or host failure.
 
 Omit `until` or use `[]` to wait for natural exit. Optional `until`, `streams`,
 and `match_mode` use the terminal tool's regex rules. A match or deadline
